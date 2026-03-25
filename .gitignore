@@ -1,0 +1,19 @@
+# Virtual environment
+.venv/
+
+# Sensitive credentials — never commit
+email_config.json
+
+# Logs
+scraper.log
+
+# Generated reports
+daily_report.pdf
+
+# Python cache
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store

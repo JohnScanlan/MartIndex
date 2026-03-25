@@ -1,0 +1,180 @@
+import time
+import pandas as pd
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
+
+BASE_URL = "https://bidding.martbids.ie/app/v7/home.php"
+WAIT_TIMEOUT = 15  # seconds
+
+def init_driver(headless=False):
+    """Initialise Chrome WebDriver."""
+    options = webdriver.ChromeOptions()
+    if headless:
+        options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1280,900")
+    
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()), options=options
+    )
+    return driver
+
+def wait_for(driver, by, selector, timeout=WAIT_TIMEOUT):
+    return WebDriverWait(driver, timeout).until(
+        EC.visibility_of_any_elements_located((by, selector))
+    )
+
+def close_popup(driver):
+    """Try to close any popup if it appears."""
+    try:
+        # Wait up to 5 seconds for popup
+        popup = WebDriverWait(driver, 5).until(
+            EC.element_to_be_clickable((By.CSS_SELECTOR, "div.popup, div.modal, button.close, .close-btn"))
+        )
+        popup.click()
+        print("  Popup closed.")
+        time.sleep(1)
+    except Exception:
+        # No popup appeared
+        pass
+
+def get_mart_names(driver):
+    """Return a list of mart elements from the homepage."""
+    selectors = [
+        "div.mart-item", "div.sale-item", "li.mart",
+        ".mart-row", "[class*='mart']", "div.yellow-card"
+    ]
+
+    for attempt in range(5):
+        for selector in selectors:
+            items = driver.find_elements(By.CSS_SELECTOR, selector)
+            if items:
+                print(f"  Found {len(items)} mart elements with selector: {selector}")
+                return items
+        print("  Mart list not found yet, retrying...")
+        time.sleep(2)
+
+    raise RuntimeError("Could not find mart list elements. Run with headless=False to debug.")  
+
+def scrape_sold_lots(driver, mart_element, mart_name):
+    """Click into a mart, switch to Sold tab, and scrape the table."""
+    print(f"  Scraping: {mart_name}")
+    try:
+        mart_element.click()
+        time.sleep(1.5)
+
+        # Click the "Sold" tab/button
+        sold_btn = WebDriverWait(driver, WAIT_TIMEOUT).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(text(),'Sold')] | //a[contains(text(),'Sold')]"))
+        )
+        sold_btn.click()
+        time.sleep(1.5)
+
+        # Wait for table rows to load
+        WebDriverWait(driver, WAIT_TIMEOUT).until(
+            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "table tbody tr, div.lot-row"))
+        )
+        time.sleep(0.5)
+
+        rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+        lots = []
+
+        for row in rows:
+            cells = row.find_elements(By.TAG_NAME, "td")
+            if len(cells) >= 5:
+                lots.append({
+                    "mart":   mart_name,
+                    "lot":    cells[0].text.strip(),
+                    "breed":  cells[1].text.strip(),
+                    "sex":    cells[2].text.strip(),
+                    "weight": cells[3].text.strip(),
+                    "price":  cells[4].text.strip(),
+                })
+
+        print(f"    -> {len(lots)} sold lots found")
+        return lots
+
+    except Exception as e:
+        print(f"    WARNING: Failed to scrape {mart_name}: {e}")
+        return []
+
+def go_back_to_home(driver):
+    """Navigate back to the mart list."""
+    # Try a back button first, then fall back to browser back
+    try:
+        back_btn = driver.find_element(By.CSS_SELECTOR, "button.back, a.back, [class*='back']")
+        back_btn.click()
+    except Exception:
+        driver.back()
+    time.sleep(1.5)
+
+def main():
+    print("Starting MartBids scraper...")
+    driver = init_driver(headless=False)   # set headless=True once you’ve confirmed it works
+
+    all_lots = []
+
+    try:
+        # Load homepage
+        driver.get(BASE_URL)
+        print("Page loaded. Waiting for mart list...")
+        time.sleep(2)
+
+        # Close popup if it appears
+        close_popup(driver)
+
+        # ---- DISCOVERY PASS: collect mart names ----
+        mart_count = len(get_mart_names(driver))
+        print(f"Found {mart_count} marts. Starting scrape...\n")
+
+        for i in range(mart_count):
+            # Reload homepage for fresh elements
+            driver.get(BASE_URL)
+            time.sleep(2)
+
+            # Close popup again if it appears
+            close_popup(driver)
+
+            items = get_mart_names(driver)
+            if i >= len(items):
+                break
+
+            item = items[i]
+
+            # Extract mart name from text or a child heading
+            try:
+                mart_name = item.find_element(By.TAG_NAME, "h2").text.strip()
+            except Exception:
+                try:
+                    mart_name = item.find_element(By.TAG_NAME, "h3").text.strip()
+                except Exception:
+                    mart_name = item.text.strip().split("\n")[0]
+
+            # Skip if no sale today or no online bidding / catalogue
+            if not mart_name:
+                continue
+
+            lots = scrape_sold_lots(driver, item, mart_name)
+            all_lots.extend(lots)
+
+    finally:
+        driver.quit()
+
+    # ---- Save results ----
+    if all_lots:
+        df = pd.DataFrame(all_lots)
+        out_file = "martbids_sold.csv"
+        df.to_csv(out_file, index=False)
+        print(f"\nDone! {len(df)} total sold lots saved to {out_file}")
+        print(df.head(20).to_string(index=False))
+    else:
+        print("\nNo data collected. Run with headless=False to debug.")
+
+if __name__ == "__main__":
+    main()
+    
