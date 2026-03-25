@@ -19,4 +19,11 @@ echo "Fetching weather data..." >> "$LOG"
 echo "Generating daily report..." >> "$LOG"
 "$PYTHON" "$DIR/generate_report.py" >> "$LOG" 2>&1
 
+# 4. Push updated data to GitHub so Streamlit Cloud stays in sync
+echo "Pushing data to GitHub..." >> "$LOG"
+cd "$DIR" && git add sold_lots.csv model_test_predictions.csv weather_cache.csv model_metadata.json cattle_model.pkl shap_values.pkl shap_background.pkl >> "$LOG" 2>&1
+git commit -m "Daily data update $(date '+%Y-%m-%d')" >> "$LOG" 2>&1
+git push https://JohnScanlan:$(cat "$DIR/.github_token")@github.com/JohnScanlan/MartIndex.git main >> "$LOG" 2>&1
+echo "GitHub push complete." >> "$LOG"
+
 echo "" >> "$LOG"

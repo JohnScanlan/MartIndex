@@ -3,6 +3,7 @@
 
 # Sensitive credentials — never commit
 email_config.json
+.github_token
 
 # Logs
 scraper.log
