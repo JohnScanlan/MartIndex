@@ -53,8 +53,9 @@ NUMERIC_FEATURES = [
     "icbf_cbv_num", "icbf_replacement_num", "icbf_ebi_num", "icbf_stars",
     "has_genomic", "quality_assured", "bvd_ok", "export_score",
     "temp_max_c", "temp_min_c", "precipitation_mm", "wind_speed_kmh",
+    "sale_month",
 ]
-CATEGORICAL_FEATURES = ["breed_grp", "sex_clean", "mart", "dam_breed_grp"]
+CATEGORICAL_FEATURES = ["breed_grp", "sex_clean", "mart", "dam_breed_grp", "breed_sex"]
 ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
 
@@ -78,10 +79,13 @@ def load_data():
     df["bvd_ok"]               = (df["bvd_tested"] == "Yes").astype(int)
     df["export_score"]         = df["export_status"].apply(export_score_fn)
     df["sex_clean"]            = df["sex"].map({"M": "M", "F": "F", "B": "B"}).fillna("Unknown")
-    df["sale_date"]            = pd.to_datetime(df["scraped_date"], errors="coerce")
+    sale_dt                    = pd.to_datetime(df["scraped_date"], errors="coerce")
+    df["sale_date"]            = sale_dt
+    df["sale_month"]           = sale_dt.dt.month.fillna(0).astype(int)
 
     top_breeds = df["breed"].value_counts().head(20).index
     df["breed_grp"] = df["breed"].where(df["breed"].isin(top_breeds), "Other")
+    df["breed_sex"] = df["breed_grp"] + "_" + df["sex_clean"]
 
     top_dam = df["dam_breed"].value_counts().head(15).index
     df["dam_breed_grp"] = (df["dam_breed"]
@@ -723,6 +727,7 @@ def tab_model(df):
                                      float(wx_def.get("wind_speed_kmh", 20.0)), step=1.0)
 
         if st.button("🐄 Predict Price", type="primary", width="content"):
+            import datetime
             input_row = {
                 "weight":               weight_val,
                 "age_months":           age_val,
@@ -740,10 +745,12 @@ def tab_model(df):
                 "temp_min_c":           temp_min,
                 "precipitation_mm":     precip,
                 "wind_speed_kmh":       wind_spd,
+                "sale_month":           datetime.date.today().month,
                 "breed_grp":            breed_val,
                 "sex_clean":            sex_val,
                 "mart":                 mart_val,
                 "dam_breed_grp":        dam_breed,
+                "breed_sex":            f"{breed_val}_{sex_val}",
             }
             input_df = pd.DataFrame([input_row])
             ppkg_pred  = model.predict(input_df)[0]

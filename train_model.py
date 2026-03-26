@@ -101,8 +101,14 @@ def load_and_engineer(csv_path: Path) -> pd.DataFrame:
 
     df["sex_clean"] = df["sex"].map({"M": "M", "F": "F", "B": "B"}).fillna("Unknown")
 
-    # ── Sale date ─────────────────────────────────────────────────────────────
-    df["sale_date"] = pd.to_datetime(df["scraped_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    # ── Breed × Sex interaction ───────────────────────────────────────────────
+    df["breed_sex"] = df["breed_grp"] + "_" + df["sex_clean"]
+
+    # ── Sale date & seasonality ───────────────────────────────────────────────
+    sale_dt = pd.to_datetime(df["scraped_date"], errors="coerce")
+    df["sale_date"]   = sale_dt.dt.strftime("%Y-%m-%d")
+    df["sale_month"]  = sale_dt.dt.month          # 1–12, strong seasonal signal
+    df["sale_month"]  = df["sale_month"].fillna(0).astype(int)
 
     # ── Merge weather ─────────────────────────────────────────────────────────
     if WEATHER_CSV.exists():
@@ -126,9 +132,10 @@ NUMERIC_FEATURES = [
     "icbf_cbv_num", "icbf_replacement_num", "icbf_ebi_num", "icbf_stars",
     "has_genomic", "quality_assured", "bvd_ok", "export_score",
     "temp_max_c", "temp_min_c", "precipitation_mm", "wind_speed_kmh",
+    "sale_month",
 ]
 
-CATEGORICAL_FEATURES = ["breed_grp", "sex_clean", "mart", "dam_breed_grp"]
+CATEGORICAL_FEATURES = ["breed_grp", "sex_clean", "mart", "dam_breed_grp", "breed_sex"]
 
 ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 TARGET       = "ppkg"
