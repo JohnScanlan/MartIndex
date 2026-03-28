@@ -179,7 +179,6 @@ def _chart_layout(**kw):
         plot_bgcolor="white",
         paper_bgcolor="white",
         font=dict(color=FB_DARK, family="system-ui, -apple-system, sans-serif"),
-        margin=dict(l=10, r=10, t=40, b=10),
     )
     base.update(kw)
     return base
