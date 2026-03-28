@@ -21,6 +21,7 @@ import plotly.graph_objects as go
 import shap
 import streamlit as st
 from sklearn.linear_model import LinearRegression
+from scipy.optimize import curve_fit
 
 warnings.filterwarnings("ignore")
 
@@ -39,7 +40,7 @@ FB_BLUE   = "#1877F2"
 FB_DARK   = "#1C1E21"
 FB_BG     = "#F0F2F5"
 FB_CARD   = "#FFFFFF"
-FB_GREY   = "#65676B"
+FB_GREY   = "#4B4F56"   # darkened for readability
 FB_GREEN  = "#42B72A"
 FB_RED    = "#FA383E"
 FB_BORDER = "#CED0D4"
@@ -134,6 +135,35 @@ st.markdown(f"""
     }}
 
     hr {{ border-color: {FB_BORDER} !important; }}
+
+    /* Body text — force readable colour everywhere */
+    body, p, li, span, label, div {{
+        color: {FB_DARK};
+    }}
+    .stMarkdown p, .stMarkdown li {{
+        color: {FB_DARK} !important;
+        font-size: 0.95rem;
+    }}
+    /* Sidebar labels */
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span {{
+        color: {FB_DARK} !important;
+    }}
+    /* Selectbox / number input text */
+    [data-testid="stSelectbox"] span,
+    [data-testid="stNumberInput"] input {{
+        color: {FB_DARK} !important;
+    }}
+    /* Caption text */
+    .stCaptionContainer p {{
+        color: {FB_GREY} !important;
+        font-size: 0.83rem !important;
+    }}
+    /* Dataframe text */
+    [data-testid="stDataFrame"] {{
+        color: {FB_DARK} !important;
+    }}
 
     /* Success/info boxes */
     .stSuccess {{
@@ -274,26 +304,50 @@ def load_weather_latest():
 
 
 @st.cache_data
-def compute_growth_rates(df_hash):
+def compute_growth_model(df_hash):
     """
-    Fit weight ~ age_months per breed_grp × sex_clean.
-    Returns dict (breed, sex) → kg_per_month.
+    Fit weight = a + b*sqrt(age_months) per breed_grp × sex_clean.
+    Sqrt model captures natural deceleration of growth as animals mature.
+    Returns dict: (breed, sex) → (a, b).
     """
     df = load_data()
     grp = df.dropna(subset=["age_months", "weight"])
-    rates = {}
+    grp = grp[grp["age_months"] > 0]
+
+    def _fit(ages, weights):
+        try:
+            popt, _ = curve_fit(
+                lambda t, a, b: a + b * np.sqrt(t),
+                ages, weights,
+                p0=[weights.mean() - 50 * np.sqrt(ages.mean()), 50],
+                maxfev=3000,
+            )
+            return float(popt[0]), max(float(popt[1]), 1.0)
+        except Exception:
+            lr = LinearRegression().fit(ages.reshape(-1, 1), weights)
+            return float(lr.intercept_), max(float(lr.coef_[0]) * 3, 1.0)
+
+    params = {}
     for (breed, sex), g in grp.groupby(["breed_grp", "sex_clean"]):
         if len(g) < 15:
             continue
-        X = g["age_months"].values.reshape(-1, 1)
-        y = g["weight"].values
-        coef = LinearRegression().fit(X, y).coef_[0]
-        rates[(breed, sex)] = max(float(coef), 0.3)
-    # overall fallback
-    X_all = grp["age_months"].values.reshape(-1, 1)
-    y_all = grp["weight"].values
-    rates[("_default", "_default")] = max(float(LinearRegression().fit(X_all, y_all).coef_[0]), 0.3)
-    return rates
+        params[(breed, sex)] = _fit(g["age_months"].values, g["weight"].values)
+
+    params[("_default", "_default")] = _fit(
+        grp["age_months"].values, grp["weight"].values
+    )
+    return params
+
+
+def project_weight(cur_weight, cur_age, months_ahead, _a, b):
+    """
+    Project weight using the sqrt growth model anchored to the animal's
+    current weight. Only the b (slope) term drives the projection — the
+    intercept is discarded so the curve passes through (cur_age, cur_weight).
+    """
+    future_age = cur_age + months_ahead
+    gain = b * (np.sqrt(max(future_age, 0.01)) - np.sqrt(max(cur_age, 0.01)))
+    return cur_weight + max(gain, 0.5 * months_ahead)
 
 
 # ── Sidebar filters ───────────────────────────────────────────────────────────
@@ -738,13 +792,13 @@ def tab_calculator(df):
     <div style="background:{FB_BLUE};border-radius:12px;padding:18px 24px;margin-bottom:20px;color:white;">
       <div style="font-size:1.3rem;font-weight:800;margin-bottom:4px;">🧮 Cattle Growth & Value Calculator</div>
       <div style="opacity:0.85;font-size:0.9rem;">
-        Enter your animal's details to project its weight and estimated market value.
-        Growth rates are calculated from our actual mart data.
+        Sqrt-anchored growth model · LightGBM price prediction ·
+        Best sell window · Comparable sales · Mart comparison · Break-even
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    growth_rates = compute_growth_rates(str(len(df)))
+    growth_params = compute_growth_model(str(len(df)))
     model        = load_model()
     all_breeds   = sorted(df["breed_grp"].dropna().unique())
     all_dam      = sorted(df["dam_breed_grp"].dropna().unique())
@@ -752,423 +806,345 @@ def tab_calculator(df):
 
     st.markdown("### Animal Details")
     c1, c2, c3 = st.columns(3)
-
     breed_val  = c1.selectbox("Breed", all_breeds,
                                index=all_breeds.index("AAX") if "AAX" in all_breeds else 0,
                                key="calc_breed")
     sex_val    = c1.selectbox("Sex", ["M", "F", "B", "Unknown"], key="calc_sex")
     dam_val    = c2.selectbox("Dam Breed", all_dam, key="calc_dam")
-    mart_val   = c2.selectbox("Target Mart", all_marts, key="calc_mart")
+    mart_val   = c2.selectbox("Primary Mart", all_marts, key="calc_mart")
     cur_weight = c3.number_input("Current Weight (kg)", 50, 800, 330, step=5)
     cur_age    = c3.number_input("Current Age (months)", 0, 60, 8, step=1)
+    months_fwd = st.slider("Months ahead to project", 1, 24, 6)
 
-    months_fwd = st.slider("Months ahead to project", 1, 24, 6,
-                            help="How many months from now you plan to sell")
-
-    # Growth rate
-    rate = growth_rates.get((breed_val, sex_val),
-            growth_rates.get(("_default", "_default"), 5.0))
+    # Resolve sqrt model params for this breed/sex
+    a, b = growth_params.get(
+        (breed_val, sex_val),
+        growth_params.get(("_default", "_default"), (-80.0, 120.0))
+    )
 
     # Month-by-month projection
     proj_months  = list(range(0, months_fwd + 1))
-    proj_weights = [cur_weight + rate * m for m in proj_months]
+    proj_weights = [project_weight(cur_weight, cur_age, m, a, b) for m in proj_months]
     proj_ages    = [cur_age + m for m in proj_months]
     target_w     = proj_weights[-1]
     weight_gain  = target_w - cur_weight
 
-    # Model predictions along the trajectory
-    val_preds    = []
-    ppkg_preds   = []
+    # LightGBM predictions along trajectory
+    val_preds, ppkg_preds = [], []
     if model:
+        wx = load_weather_latest()
+        mart_wx = wx.get(mart_val, {})
+        today = datetime.date.today()
         for m, wt, ag in zip(proj_months, proj_weights, proj_ages):
-            future_month = (datetime.date.today().month + m - 1) % 12 + 1
+            future_month = (today.month + m - 1) % 12 + 1
             inp = {
-                "weight":               wt,
-                "age_months":           ag,
-                "days_in_herd":         300,
-                "no_of_owners":         1,
-                "icbf_cbv_num":         np.nan,
-                "icbf_replacement_num": np.nan,
-                "icbf_ebi_num":         np.nan,
-                "icbf_stars":           0,
-                "has_genomic":          0,
-                "quality_assured":      1,
-                "bvd_ok":               1,
-                "export_score":         2,
-                "temp_max_c":           15.0,
-                "temp_min_c":            8.0,
-                "precipitation_mm":      2.0,
-                "wind_speed_kmh":       20.0,
-                "sale_month":           future_month,
-                "breed_grp":            breed_val,
-                "sex_clean":            sex_val,
-                "mart":                 mart_val,
-                "dam_breed_grp":        dam_val,
-                "breed_sex":            f"{breed_val}_{sex_val}",
+                "weight": wt, "age_months": ag,
+                "days_in_herd": 300, "no_of_owners": 1,
+                "icbf_cbv_num": np.nan, "icbf_replacement_num": np.nan,
+                "icbf_ebi_num": np.nan, "icbf_stars": 0,
+                "has_genomic": 0, "quality_assured": 1, "bvd_ok": 1, "export_score": 2,
+                "temp_max_c": mart_wx.get("temp_max_c", 15.0),
+                "temp_min_c": mart_wx.get("temp_min_c", 8.0),
+                "precipitation_mm": mart_wx.get("precipitation_mm", 2.0),
+                "wind_speed_kmh": mart_wx.get("wind_speed_kmh", 20.0),
+                "sale_month": future_month,
+                "breed_grp": breed_val, "sex_clean": sex_val,
+                "mart": mart_val, "dam_breed_grp": dam_val,
+                "breed_sex": f"{breed_val}_{sex_val}",
             }
-            ppkg = model.predict(pd.DataFrame([inp]))[0]
+            ppkg = float(model.predict(pd.DataFrame([inp]))[0])
             ppkg_preds.append(ppkg)
             val_preds.append(ppkg * wt)
 
     # ── KPI cards ─────────────────────────────────────────────────────────────
     st.divider()
     r1, r2, r3, r4 = st.columns(4)
-    r1.metric("Data-derived Growth Rate",
-              f"{rate:.1f} kg/month",
-              help=f"Linear regression on {breed_val} {sex_val} animals in our dataset")
-    r2.metric(f"Projected Weight (+{months_fwd}m)",
-              f"{target_w:.0f} kg",
+    r1.metric("Growth Rate (sqrt model)", f"{b:.1f} kg/√month",
+              help="Higher = faster-maturing breed from our mart data")
+    r2.metric(f"Projected Weight (+{months_fwd}m)", f"{target_w:.0f} kg",
               delta=f"+{weight_gain:.0f} kg")
     if ppkg_preds:
-        r3.metric("Estimated €/kg at target",  f"€{ppkg_preds[-1]:.2f}")
-        r4.metric("Estimated Value at target",
-                  f"€{val_preds[-1]:,.0f}",
-                  delta=f"vs now €{val_preds[0]:,.0f}" if val_preds else None)
+        r3.metric("Est. €/kg at target", f"€{ppkg_preds[-1]:.2f}")
+        r4.metric("Est. Value at target", f"€{val_preds[-1]:,.0f}",
+                  delta=f"vs now €{val_preds[0]:,.0f}")
 
     st.divider()
 
-    # ── Growth chart ──────────────────────────────────────────────────────────
-    comp = df[(df["breed_grp"] == breed_val) &
-              (df["sex_clean"] == sex_val)].dropna(subset=["age_months", "weight"])
-
+    # ── Growth chart with sqrt population curve ────────────────────────────────
+    comp_all = df[(df["breed_grp"] == breed_val) & (df["sex_clean"] == sex_val)] \
+                 .dropna(subset=["age_months", "weight"])
     fig = go.Figure()
-
-    # Background scatter of comparable sold animals
-    if len(comp) > 0:
-        sample = comp.sample(min(400, len(comp)), random_state=42)
+    if len(comp_all) > 0:
+        sample = comp_all.sample(min(400, len(comp_all)), random_state=42)
         fig.add_trace(go.Scatter(
-            x=sample["age_months"], y=sample["weight"],
-            mode="markers",
-            marker=dict(color=f"rgba(24,119,242,0.20)", size=5, symbol="circle"),
-            name=f"{breed_val} {sex_val} — sold animals",
+            x=sample["age_months"], y=sample["weight"], mode="markers",
+            marker=dict(color="rgba(24,119,242,0.18)", size=5),
+            name=f"{breed_val} {sex_val} — sold",
             hovertemplate="Age: %{x:.0f}m  Weight: %{y:.0f}kg<extra></extra>",
         ))
-
-    # Projected path
+        age_range = np.linspace(comp_all["age_months"].min(), comp_all["age_months"].max(), 80)
+        fig.add_trace(go.Scatter(
+            x=age_range, y=a + b * np.sqrt(age_range), mode="lines",
+            line=dict(color=FB_BLUE, width=1.5, dash="dot"),
+            name="Sqrt fit (population)",
+        ))
     fig.add_trace(go.Scatter(
-        x=proj_ages, y=proj_weights,
-        mode="lines+markers",
-        line=dict(color=FB_GREEN, width=3),
-        marker=dict(size=7, color=FB_GREEN),
-        name="Your animal's projected path",
-        customdata=proj_months,
-        hovertemplate="Month +%{customdata}: %{y:.0f} kg  (age %{x:.0f}m)<extra></extra>",
+        x=proj_ages, y=proj_weights, mode="lines+markers",
+        line=dict(color=FB_GREEN, width=3), marker=dict(size=7, color=FB_GREEN),
+        name="Your animal", customdata=proj_months,
+        hovertemplate="Month +%{customdata}: %{y:.0f}kg (age %{x:.0f}m)<extra></extra>",
     ))
-
-    # Current position
-    fig.add_trace(go.Scatter(
-        x=[cur_age], y=[cur_weight],
-        mode="markers",
+    fig.add_trace(go.Scatter(x=[cur_age], y=[cur_weight], mode="markers",
         marker=dict(color=FB_BLUE, size=16, symbol="circle",
-                    line=dict(color="white", width=3)),
-        name="Current",
-        hovertemplate=f"Now: {cur_weight}kg at {cur_age}m<extra></extra>",
-    ))
-
-    # Target
-    fig.add_trace(go.Scatter(
-        x=[proj_ages[-1]], y=[target_w],
-        mode="markers",
+                    line=dict(color="white", width=3)), name="Now"))
+    fig.add_trace(go.Scatter(x=[proj_ages[-1]], y=[target_w], mode="markers",
         marker=dict(color=FB_GREEN, size=16, symbol="star",
-                    line=dict(color="white", width=2)),
-        name=f"Target (+{months_fwd}m)",
-        hovertemplate=f"Target: {target_w:.0f}kg at {proj_ages[-1]}m<extra></extra>",
-    ))
-
+                    line=dict(color="white", width=2)), name=f"Target (+{months_fwd}m)"))
     fig.update_layout(
-        title=f"{breed_val} {sex_val} — Growth Projection ({months_fwd} months)",
-        xaxis_title="Age (months)",
-        yaxis_title="Weight (kg)",
-        height=500,
-        legend=dict(orientation="h", y=1.06),
-        **_chart_layout(),
+        title=f"{breed_val} {sex_val} — Sqrt-Anchored Growth Projection",
+        xaxis_title="Age (months)", yaxis_title="Weight (kg)",
+        height=480, legend=dict(orientation="h", y=1.06), **_chart_layout(),
     )
     fig.update_xaxes(gridcolor="#F0F2F5")
     fig.update_yaxes(gridcolor="#F0F2F5")
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
-    # ── Value trajectory ──────────────────────────────────────────────────────
     if val_preds:
         col_v1, col_v2 = st.columns(2)
-
         with col_v1:
-            fig_val = go.Figure()
-            fig_val.add_trace(go.Scatter(
-                x=proj_months, y=val_preds,
-                fill="tozeroy",
-                fillcolor="rgba(66, 183, 42, 0.12)",
-                line=dict(color=FB_GREEN, width=2.5),
-                mode="lines+markers",
-                marker=dict(size=6, color=FB_GREEN),
+            fv = go.Figure(go.Scatter(
+                x=proj_months, y=val_preds, fill="tozeroy",
+                fillcolor="rgba(66,183,42,0.12)", line=dict(color=FB_GREEN, width=2.5),
+                mode="lines+markers", marker=dict(size=6, color=FB_GREEN),
                 hovertemplate="Month +%{x}: €%{y:,.0f}<extra></extra>",
             ))
-            fig_val.update_layout(
-                title="Estimated Market Value Over Time",
-                xaxis_title="Months from now",
-                yaxis_title="Estimated Value (€)",
-                height=320,
-                **_chart_layout(),
-            )
-            fig_val.update_xaxes(gridcolor="#F0F2F5", tickvals=proj_months)
-            fig_val.update_yaxes(gridcolor="#F0F2F5")
-            st.plotly_chart(fig_val, width="stretch")
-
+            fv.update_layout(title="Estimated Market Value", xaxis_title="Months from now",
+                             yaxis_title="€", height=300, **_chart_layout())
+            fv.update_xaxes(gridcolor="#F0F2F5", tickvals=proj_months)
+            fv.update_yaxes(gridcolor="#F0F2F5")
+            st.plotly_chart(fv, use_container_width=True)
         with col_v2:
-            fig_ppkg = go.Figure()
-            fig_ppkg.add_trace(go.Scatter(
-                x=proj_months, y=ppkg_preds,
-                line=dict(color=FB_BLUE, width=2.5),
-                mode="lines+markers",
-                marker=dict(size=6, color=FB_BLUE),
+            fp = go.Figure(go.Scatter(
+                x=proj_months, y=ppkg_preds, line=dict(color=FB_BLUE, width=2.5),
+                mode="lines+markers", marker=dict(size=6, color=FB_BLUE),
                 hovertemplate="Month +%{x}: €%{y:.2f}/kg<extra></extra>",
             ))
-            fig_ppkg.update_layout(
-                title="Estimated Price per KG Over Time",
-                xaxis_title="Months from now",
-                yaxis_title="€/kg",
-                height=320,
-                **_chart_layout(),
-            )
-            fig_ppkg.update_xaxes(gridcolor="#F0F2F5", tickvals=proj_months)
-            fig_ppkg.update_yaxes(gridcolor="#F0F2F5")
-            st.plotly_chart(fig_ppkg, width="stretch")
+            fp.update_layout(title="Est. Price per KG", xaxis_title="Months from now",
+                             yaxis_title="€/kg", height=300, **_chart_layout())
+            fp.update_xaxes(gridcolor="#F0F2F5", tickvals=proj_months)
+            fp.update_yaxes(gridcolor="#F0F2F5")
+            st.plotly_chart(fp, use_container_width=True)
 
-        # Summary table
         st.subheader("Projection Summary")
-        summary = pd.DataFrame({
+        st.dataframe(pd.DataFrame({
             "Month":          [f"+{m}m" for m in proj_months],
-            "Age":            [f"{a}m" for a in proj_ages],
+            "Age":            [f"{ag}m" for ag in proj_ages],
             "Weight (kg)":    [f"{w:.0f}" for w in proj_weights],
             "Est. €/kg":      [f"€{p:.2f}" for p in ppkg_preds],
             "Est. Value (€)": [f"€{v:,.0f}" for v in val_preds],
-        })
-        st.dataframe(summary, use_container_width=True, hide_index=True)
+        }), use_container_width=True, hide_index=True)
 
+    # ── Best Time to Sell ─────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("📅 Best Time to Sell")
+    bts_data = df[(df["breed_grp"] == breed_val) & (df["sex_clean"] == sex_val)] \
+                 .dropna(subset=["price_per_kg_num", "weight", "age_months"]).copy()
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# TAB 6 — ML Model
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _shap_beeswarm_fig(shap_values, feature_names):
-    fig, ax = plt.subplots(figsize=(9, 5))
-    shap.plots.beeswarm(
-        shap.Explanation(
-            values=shap_values.values,
-            base_values=shap_values.base_values,
-            data=shap_values.data,
-            feature_names=feature_names,
-        ),
-        max_display=16, show=False, plot_size=None,
-    )
-    plt.tight_layout()
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=130, bbox_inches="tight")
-    buf.seek(0)
-    data = buf.read()
-    plt.close("all")
-    return data
-
-
-def _shap_waterfall_fig(shap_exp_row, feature_names):
-    fig, ax = plt.subplots(figsize=(8, 5))
-    shap.plots.waterfall(
-        shap.Explanation(
-            values=shap_exp_row.values,
-            base_values=float(shap_exp_row.base_values),
-            data=shap_exp_row.data,
-            feature_names=feature_names,
-        ),
-        max_display=14, show=False,
-    )
-    plt.tight_layout()
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=130, bbox_inches="tight")
-    buf.seek(0)
-    data = buf.read()
-    plt.close("all")
-    return data
-
-
-def tab_model(df):
-    model       = load_model()
-    meta        = load_meta()
-    preds       = load_test_preds()
-    shap_vals, shap_bg = load_shap_objects()
-    wx_latest   = load_weather_latest()
-
-    if meta:
-        st.subheader("Model Performance  (LightGBM — target: €/kg)")
-        tm = meta.get("test_metrics", {})
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("Test R²",   f"{tm.get('R2', 0):.4f}")
-        m2.metric("Test MAE",  f"€{tm.get('MAE_eur_kg', 0):.4f}/kg")
-        m3.metric("Test RMSE", f"€{tm.get('RMSE_eur_kg', 0):.4f}/kg")
-        m4.metric("MAPE",      f"{tm.get('MAPE_%', 0):.1f}%")
-        m5.metric("CV MAE",    f"€{meta.get('cv_mae_eur_kg', 0):.4f}/kg ± €{meta.get('cv_mae_std', 0):.4f}")
-
-        within_items = {
-            "Within 5%":  tm.get("within_5pct", 0),
-            "Within 10%": tm.get("within_10pct", 0),
-            "Within 20%": tm.get("within_20pct", 0),
-        }
-        wcols = st.columns(len(within_items))
-        for col, (label, val) in zip(wcols, within_items.items()):
-            col.metric(label, f"{val:.1f}%")
-
-        st.divider()
-
-    col_a, col_b = st.columns(2)
-
-    with col_a:
-        if meta.get("feature_importances"):
-            imp = (pd.Series(meta["feature_importances"])
-                     .sort_values(ascending=True)
-                     .tail(15))
-            fig = px.bar(
-                x=imp.values, y=imp.index, orientation="h",
-                color=imp.values,
-                color_continuous_scale=[[0, "#E7F3FF"], [1, FB_BLUE]],
-                title="Feature Importances (Top 15)",
-                labels={"x": "Importance", "y": "Feature"},
+    if len(bts_data) >= 20:
+        bts_data["wt_bucket"]  = (bts_data["weight"] // 50 * 50).astype(int)
+        bts_data["age_bucket"] = (bts_data["age_months"] // 6 * 6).astype(int)
+        pivot = bts_data.pivot_table(values="price_per_kg_num", index="wt_bucket",
+                                     columns="age_bucket", aggfunc="median", observed=True)
+        counts = bts_data.pivot_table(values="price_per_kg_num", index="wt_bucket",
+                                      columns="age_bucket", aggfunc="count", observed=True)
+        pivot = pivot.where(counts >= 5)
+        if not pivot.empty:
+            fig_hm = go.Figure(go.Heatmap(
+                z=pivot.values,
+                x=[f"{int(c)}m" for c in pivot.columns],
+                y=[f"{int(r)}kg" for r in pivot.index],
+                colorscale="YlGn", colorbar=dict(title="€/kg"),
+                hovertemplate="Weight: %{y}  Age: %{x}<br>Median: €%{z:.2f}/kg<extra></extra>",
+                zmin=bts_data["price_per_kg_num"].quantile(0.05),
+                zmax=bts_data["price_per_kg_num"].quantile(0.95),
+            ))
+            fig_hm.add_trace(go.Scatter(
+                x=[f"{int(cur_age // 6 * 6)}m"], y=[f"{int(cur_weight // 50 * 50)}kg"],
+                mode="markers",
+                marker=dict(symbol="star", size=18, color=FB_RED,
+                            line=dict(color="white", width=2)),
+                name="Your animal now",
+            ))
+            fig_hm.update_layout(
+                title=f"{breed_val} {sex_val} — Median €/kg by Weight & Age",
+                xaxis_title="Age bracket", yaxis_title="Weight bracket",
+                height=400, **_chart_layout(),
             )
-            fig.update_layout(coloraxis_showscale=False, height=460,
-                              margin=dict(l=10), **_chart_layout())
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig_hm, use_container_width=True)
 
-    with col_b:
-        if not preds.empty:
-            act_col  = "actual_ppkg"    if "actual_ppkg"    in preds.columns else "actual"
-            pred_col = "predicted_ppkg" if "predicted_ppkg" in preds.columns else "predicted"
-            fig2 = px.scatter(
-                preds, x=act_col, y=pred_col,
-                color="breed", opacity=0.6,
-                hover_data={"mart": True, "sex": True, "weight": True},
-                title="Actual vs Predicted (€/kg)",
-                labels={act_col: "Actual €/kg", pred_col: "Predicted €/kg"},
-                height=460, color_discrete_sequence=PALETTE,
-            )
-            lo = min(preds[act_col].min(), preds[pred_col].min())
-            hi = max(preds[act_col].max(), preds[pred_col].max())
-            fig2.add_trace(go.Scatter(x=[lo, hi], y=[lo, hi], mode="lines",
-                                      name="Perfect",
-                                      line=dict(color=FB_RED, dash="dash", width=1.5)))
-            fig2.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.01),
-                               **_chart_layout())
-            st.plotly_chart(fig2, width="stretch")
+        # Model-simulated monthly price (holding weight/age constant at target)
+        if model and ppkg_preds:
+            month_names = ["Jan","Feb","Mar","Apr","May","Jun",
+                           "Jul","Aug","Sep","Oct","Nov","Dec"]
+            month_ppkg = []
+            base = {"weight": target_w, "age_months": float(proj_ages[-1]),
+                    "days_in_herd": 300, "no_of_owners": 1,
+                    "icbf_cbv_num": np.nan, "icbf_replacement_num": np.nan,
+                    "icbf_ebi_num": np.nan, "icbf_stars": 0,
+                    "has_genomic": 0, "quality_assured": 1, "bvd_ok": 1, "export_score": 2,
+                    "temp_max_c": 15.0, "temp_min_c": 8.0,
+                    "precipitation_mm": 2.0, "wind_speed_kmh": 20.0,
+                    "breed_grp": breed_val, "sex_clean": sex_val,
+                    "mart": mart_val, "dam_breed_grp": dam_val,
+                    "breed_sex": f"{breed_val}_{sex_val}"}
+            for mo in range(1, 13):
+                month_ppkg.append(float(model.predict(pd.DataFrame([{**base, "sale_month": mo}]))[0]))
+            fig_s = go.Figure(go.Bar(
+                x=month_names, y=month_ppkg,
+                marker_color=[FB_GREEN if v == max(month_ppkg) else FB_BLUE for v in month_ppkg],
+                hovertemplate="%{x}: €%{y:.2f}/kg<extra></extra>",
+            ))
+            fig_s.update_layout(title="Predicted €/kg by Sale Month (at target weight & age)",
+                                xaxis_title="Month", yaxis_title="Predicted €/kg",
+                                height=280, **_chart_layout())
+            st.plotly_chart(fig_s, use_container_width=True)
+    else:
+        st.info(f"Not enough data for {breed_val} {sex_val} to build price heatmap "
+                f"({len(bts_data)} rows, need ≥ 20).")
 
-    if not preds.empty:
-        act_col  = "actual_ppkg"    if "actual_ppkg"    in preds.columns else "actual"
-        pred_col = "predicted_ppkg" if "predicted_ppkg" in preds.columns else "predicted"
-        preds["residual"] = preds[pred_col] - preds[act_col]
-        fig3 = px.histogram(
-            preds, x="residual", nbins=60,
-            color_discrete_sequence=[FB_BLUE],
-            title="Residuals (Predicted − Actual, €/kg)",
-            labels={"residual": "Residual (€/kg)"}, height=300,
-        )
-        fig3.add_vline(x=0, line_dash="dash", line_color=FB_RED)
-        fig3.update_layout(**_chart_layout())
-        st.plotly_chart(fig3, width="stretch")
+    # ── Comparable Recent Sales ───────────────────────────────────────────────
+    st.divider()
+    st.subheader("🔍 Comparable Recent Sales")
+    st.caption(f"{breed_val} {sex_val}, weight {cur_weight*0.8:.0f}–{cur_weight*1.2:.0f} kg, "
+               f"age {max(0,cur_age-4):.0f}–{cur_age+4:.0f} months")
+    comp = df[
+        (df["breed_grp"] == breed_val) & (df["sex_clean"] == sex_val) &
+        df["weight"].between(cur_weight * 0.8, cur_weight * 1.2) &
+        df["age_months"].between(max(0, cur_age - 4), cur_age + 4)
+    ].copy().sort_values("sale_date", ascending=False)
 
-    # SHAP Beeswarm
-    if shap_vals is not None:
-        st.divider()
-        st.subheader("SHAP Feature Explanations (Global)")
-        st.caption("Each dot is a test-set prediction. Red = high feature value, blue = low.")
-        try:
-            st.image(_shap_beeswarm_fig(shap_vals, ALL_FEATURES), use_container_width=True)
-        except Exception as e:
-            st.warning(f"SHAP beeswarm unavailable: {e}")
+    if len(comp) > 0:
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Comparables Found", len(comp))
+        s2.metric("Avg Price", f"€{comp['price_num'].mean():,.0f}")
+        s3.metric("Avg €/kg",  f"€{comp['price_per_kg_num'].mean():.2f}")
+        show = comp[["mart","breed","sex_clean","age_months","weight",
+                     "price_num","price_per_kg_num","sale_date"]].head(50).copy()
+        show = show.rename(columns={"sex_clean":"Sex","age_months":"Age (m)",
+                                    "price_num":"Price (€)","price_per_kg_num":"€/kg",
+                                    "sale_date":"Date"})
+        show["Price (€)"] = show["Price (€)"].map("€{:,.0f}".format)
+        show["€/kg"]      = show["€/kg"].map("€{:.2f}".format)
+        st.dataframe(show, use_container_width=True, hide_index=True)
+    else:
+        wider = df[(df["breed_grp"] == breed_val) &
+                   df["weight"].between(cur_weight * 0.7, cur_weight * 1.3)]
+        st.info(f"No close matches. Showing {len(wider)} similar {breed_val} animals (±30% weight, any sex).")
+        if len(wider) > 0:
+            st.dataframe(wider[["mart","breed","sex_clean","age_months","weight",
+                                 "price_num","price_per_kg_num"]]
+                           .sort_values("price_per_kg_num", ascending=False)
+                           .head(20), use_container_width=True, hide_index=True)
 
-    # Price Predictor
+    # ── Mart Comparison ───────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("🏪 Mart Comparison")
+    st.caption(f"Predicted value for {breed_val} {sex_val} at {target_w:.0f}kg / "
+               f"age {proj_ages[-1]}m across all marts")
     if model:
-        st.divider()
-        st.subheader("Price Predictor")
-        st.caption("Fill in the animal details to get a predicted price (€/kg and €total).")
+        today = datetime.date.today()
+        future_month = (today.month + months_fwd - 1) % 12 + 1
+        wx = load_weather_latest()
+        mart_rows = []
+        for m_name in all_marts:
+            mwx = wx.get(m_name, {})
+            inp = {"weight": target_w, "age_months": float(proj_ages[-1]),
+                   "days_in_herd": 300, "no_of_owners": 1,
+                   "icbf_cbv_num": np.nan, "icbf_replacement_num": np.nan,
+                   "icbf_ebi_num": np.nan, "icbf_stars": 0,
+                   "has_genomic": 0, "quality_assured": 1, "bvd_ok": 1, "export_score": 2,
+                   "temp_max_c": mwx.get("temp_max_c", 15.0),
+                   "temp_min_c": mwx.get("temp_min_c", 8.0),
+                   "precipitation_mm": mwx.get("precipitation_mm", 2.0),
+                   "wind_speed_kmh": mwx.get("wind_speed_kmh", 20.0),
+                   "sale_month": future_month, "breed_grp": breed_val,
+                   "sex_clean": sex_val, "mart": m_name,
+                   "dam_breed_grp": dam_val, "breed_sex": f"{breed_val}_{sex_val}"}
+            ppkg_m = float(model.predict(pd.DataFrame([inp]))[0])
+            mart_rows.append({"Mart": m_name, "Pred. €/kg": ppkg_m,
+                              "Pred. Value": ppkg_m * target_w, "selected": m_name == mart_val})
+        mart_df = pd.DataFrame(mart_rows).sort_values("Pred. €/kg", ascending=False)
+        best_mart = mart_df.iloc[0]["Mart"]
+        best_ppkg = mart_df.iloc[0]["Pred. €/kg"]
+        colors = [FB_GREEN if r["selected"] else
+                  ("#F7B928" if r["Mart"] == best_mart else FB_BLUE)
+                  for _, r in mart_df.iterrows()]
+        fig_m = go.Figure(go.Bar(
+            x=mart_df["Mart"], y=mart_df["Pred. €/kg"],
+            marker_color=colors,
+            hovertemplate="%{x}: €%{y:.2f}/kg<extra></extra>",
+        ))
+        sel_ppkg = mart_df[mart_df["Mart"] == mart_val]["Pred. €/kg"].values[0]
+        fig_m.add_hline(y=sel_ppkg, line_dash="dash", line_color=FB_GREEN,
+                        annotation_text=f"Your mart ({mart_val})",
+                        annotation_position="top left")
+        fig_m.update_layout(title="Predicted €/kg at Target Weight Across All Marts",
+                            xaxis_title="Mart", yaxis_title="Predicted €/kg",
+                            xaxis_tickangle=-40, height=400, **_chart_layout())
+        st.plotly_chart(fig_m, use_container_width=True)
+        if best_mart != mart_val:
+            sel_val = mart_df[mart_df["Mart"] == mart_val]["Pred. Value"].values[0]
+            best_val = mart_df.iloc[0]["Pred. Value"]
+            st.info(f"Best predicted mart: **{best_mart}** at €{best_ppkg:.2f}/kg "
+                    f"(€{best_val:,.0f} total) — €{best_val - sel_val:,.0f} more than {mart_val}.")
 
-        all_breeds = sorted(df["breed_grp"].dropna().unique())
-        all_marts  = sorted(df["mart"].dropna().unique())
-        all_dam    = sorted(df["dam_breed_grp"].dropna().unique())
+    # ── Break-Even Calculator ─────────────────────────────────────────────────
+    st.divider()
+    st.subheader("💰 Break-Even Calculator")
+    be1, be2 = st.columns(2)
+    purchase_cost    = be1.number_input("Purchase / total cost to date (€)", 0, 20000, 1200, step=50)
+    ongoing_monthly  = be2.number_input("Ongoing monthly costs (€/month)", 0, 500, 50, step=10)
 
-        c1, c2, c3, c4 = st.columns(4)
-        weight_val = c1.number_input("Weight (kg)",   50,  1000, 500, step=5)
-        age_val    = c1.number_input("Age (months)",   0,   120,  24, step=1)
-        days_herd  = c2.number_input("Days in Herd",   0,  2000, 300, step=10)
-        n_owners   = c2.number_input("No. of Owners",  1,    10,   1, step=1)
-        breed_val  = c3.selectbox("Breed",  all_breeds,
-                                   index=all_breeds.index("LMX") if "LMX" in all_breeds else 0)
-        sex_val    = c3.selectbox("Sex",    ["M", "F", "B", "Unknown"])
-        mart_val   = c4.selectbox("Mart",   all_marts)
-        dam_breed  = c4.selectbox("Dam Breed", all_dam)
+    if val_preds and purchase_cost > 0:
+        total_costs = [purchase_cost + ongoing_monthly * m for m in proj_months]
+        net_profit  = [v - c for v, c in zip(val_preds, total_costs)]
+        be_month = next((m for m, p in zip(proj_months, net_profit) if p >= 0), None)
 
-        st.markdown("**ICBF / Health**")
-        h1, h2, h3, h4, h5 = st.columns(5)
-        qa_val      = h1.checkbox("Quality Assured", value=True)
-        bvd_val     = h2.checkbox("BVD Tested",      value=True)
-        genomic_val = h3.checkbox("Genomic Eval",    value=False)
-        export_val  = h4.selectbox("Export Status",  ["Yes", "ReTest", "No"], index=0)
-        icbf_cbv_on = h5.checkbox("Include ICBF CBV", value=False)
-        icbf_cbv_val = h5.number_input("ICBF CBV (€)", -500, 1000, 0, step=5) if icbf_cbv_on else None
+        if be_month == 0:
+            st.success(f"Already profitable — current value €{val_preds[0]:,.0f} > cost €{purchase_cost:,.0f}.")
+        elif be_month is not None:
+            st.success(f"Break-even at **+{be_month} months** — age {cur_age+be_month}m, "
+                       f"est. {proj_weights[be_month]:.0f}kg, value €{val_preds[be_month]:,.0f}.")
+        else:
+            st.warning(f"No break-even within {months_fwd} months. "
+                       f"At +{months_fwd}m: value €{val_preds[-1]:,.0f} vs cost €{total_costs[-1]:,.0f}.")
 
-        i1, _ = st.columns(2)
-        icbf_rep_on  = i1.checkbox("Include ICBF Replacement Index", value=False)
-        icbf_rep_val = i1.number_input("ICBF Replacement Index (€)", -500, 1000, 0, step=5,
-                                        disabled=not icbf_rep_on)
-
-        st.markdown("**Weather (on day of sale)**")
-        wx_def = wx_latest.get(mart_val, {})
-        wx1, wx2, wx3, wx4 = st.columns(4)
-        temp_max  = wx1.number_input("Max Temp (°C)",     -10.0,  40.0, float(wx_def.get("temp_max_c",   15.0)), step=0.5)
-        temp_min  = wx2.number_input("Min Temp (°C)",     -15.0,  35.0, float(wx_def.get("temp_min_c",    8.0)), step=0.5)
-        precip    = wx3.number_input("Precipitation (mm)",  0.0,  80.0, float(wx_def.get("precipitation_mm", 2.0)), step=0.5)
-        wind_spd  = wx4.number_input("Wind Speed (km/h)",   0.0, 120.0, float(wx_def.get("wind_speed_kmh", 20.0)), step=1.0)
-
-        if st.button("Predict Price", type="primary", width="content"):
-            input_row = {
-                "weight":               weight_val,
-                "age_months":           age_val,
-                "days_in_herd":         days_herd,
-                "no_of_owners":         n_owners,
-                "icbf_cbv_num":         float(icbf_cbv_val) if icbf_cbv_on and icbf_cbv_val is not None else np.nan,
-                "icbf_replacement_num": float(icbf_rep_val) if icbf_rep_on else np.nan,
-                "icbf_ebi_num":         np.nan,
-                "icbf_stars":           0,
-                "has_genomic":          int(genomic_val),
-                "quality_assured":      int(qa_val),
-                "bvd_ok":               int(bvd_val),
-                "export_score":         {"Yes": 2, "ReTest": 1, "No": 0}.get(export_val, np.nan),
-                "temp_max_c":           temp_max,
-                "temp_min_c":           temp_min,
-                "precipitation_mm":     precip,
-                "wind_speed_kmh":       wind_spd,
-                "sale_month":           datetime.date.today().month,
-                "breed_grp":            breed_val,
-                "sex_clean":            sex_val,
-                "mart":                 mart_val,
-                "dam_breed_grp":        dam_breed,
-                "breed_sex":            f"{breed_val}_{sex_val}",
-            }
-            input_df  = pd.DataFrame([input_row])
-            ppkg_pred = model.predict(input_df)[0]
-            total_pred = ppkg_pred * weight_val
-
-            r1, r2 = st.columns(2)
-            r1.success(f"**Predicted Price/kg: €{ppkg_pred:.2f}/kg**")
-            r2.success(f"**Predicted Total:  €{total_pred:,.0f}**")
-
-            if shap_bg is not None:
-                try:
-                    prep        = model.named_steps["prep"]
-                    lgb_step    = model.named_steps["model"]
-                    input_t     = prep.transform(input_df)
-                    explainer_w = shap.TreeExplainer(lgb_step, data=shap_bg)
-                    sv_single   = explainer_w(input_t)
-                    st.subheader("SHAP Explanation for this Prediction")
-                    st.caption("How each feature pushed the price above or below average.")
-                    st.image(_shap_waterfall_fig(sv_single[0], ALL_FEATURES),
-                             use_container_width=True)
-                except Exception as e:
-                    st.info(f"SHAP waterfall unavailable: {e}")
+        fig_be = go.Figure()
+        fig_be.add_trace(go.Scatter(x=proj_months, y=val_preds, mode="lines+markers",
+            name="Est. Value", line=dict(color=FB_GREEN, width=2.5),
+            marker=dict(size=6), hovertemplate="Month +%{x}: €%{y:,.0f}<extra></extra>"))
+        fig_be.add_trace(go.Scatter(x=proj_months, y=total_costs, mode="lines+markers",
+            name="Total Cost", line=dict(color=FB_RED, width=2.5, dash="dash"),
+            marker=dict(size=6), hovertemplate="Month +%{x}: cost €%{y:,.0f}<extra></extra>"))
+        if be_month and be_month > 0:
+            fig_be.add_vline(x=be_month, line_dash="dot", line_color=FB_GREEN,
+                             annotation_text=f"Break-even +{be_month}m",
+                             annotation_position="top")
+        fig_be.update_layout(title="Market Value vs Total Cost",
+                             xaxis_title="Months from now", yaxis_title="€",
+                             height=320, legend=dict(orientation="h", y=1.06),
+                             **_chart_layout())
+        st.plotly_chart(fig_be, use_container_width=True)
+        st.dataframe(pd.DataFrame({
+            "Month":      [f"+{m}m" for m in proj_months],
+            "Age":        [f"{ag}m" for ag in proj_ages],
+            "Weight":     [f"{w:.0f}kg" for w in proj_weights],
+            "Est. Value": [f"€{v:,.0f}" for v in val_preds],
+            "Total Cost": [f"€{c:,.0f}" for c in total_costs],
+            "Net Profit": [f"€{p:+,.0f}" for p in net_profit],
+        }), use_container_width=True, hide_index=True)
+    else:
+        st.info("Enter a purchase cost above to see break-even analysis.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1198,13 +1174,12 @@ def main():
         st.warning("No data matches the current filters. Try widening your selection.")
         return
 
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Market Overview",
         "🔍 Price Explorer",
         "🐄 Breed & Mart",
         "📈 Price Tracker",
         "🧮 Growth Calculator",
-        "🤖 ML Model",
     ])
 
     with tab1: tab_overview(df)
@@ -1212,7 +1187,6 @@ def main():
     with tab3: tab_breed_mart(df)
     with tab4: tab_tracker(df)
     with tab5: tab_calculator(df)
-    with tab6: tab_model(df)
 
 
 if __name__ == "__main__":
