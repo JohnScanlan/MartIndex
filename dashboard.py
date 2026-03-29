@@ -927,6 +927,7 @@ def tab_calculator(df):
                 "breed_grp": breed_val, "sex_clean": sex_val,
                 "mart": mart_val, "dam_breed_grp": dam_val,
                 "breed_sex": f"{breed_val}_{sex_val}",
+                "source": "martbids",
             }
             ppkg = float(model.predict(pd.DataFrame([inp]))[0])
             ppkg_preds.append(ppkg)
@@ -1072,7 +1073,8 @@ def tab_calculator(df):
                     "precipitation_mm": 2.0, "wind_speed_kmh": 20.0,
                     "breed_grp": breed_val, "sex_clean": sex_val,
                     "mart": mart_val, "dam_breed_grp": dam_val,
-                    "breed_sex": f"{breed_val}_{sex_val}"}
+                    "breed_sex": f"{breed_val}_{sex_val}",
+                    "source": "martbids"}
             for mo in range(1, 13):
                 month_ppkg.append(float(model.predict(pd.DataFrame([{**base, "sale_month": mo}]))[0]))
             fig_s = go.Figure(go.Bar(
@@ -1145,7 +1147,8 @@ def tab_calculator(df):
                    "wind_speed_kmh": mwx.get("wind_speed_kmh", 20.0),
                    "sale_month": future_month, "breed_grp": breed_val,
                    "sex_clean": sex_val, "mart": m_name,
-                   "dam_breed_grp": dam_val, "breed_sex": f"{breed_val}_{sex_val}"}
+                   "dam_breed_grp": dam_val, "breed_sex": f"{breed_val}_{sex_val}",
+                   "source": "martbids"}
             ppkg_m = float(model.predict(pd.DataFrame([inp]))[0])
             mart_rows.append({"Mart": m_name, "Pred. €/kg": ppkg_m,
                               "Pred. Value": ppkg_m * target_w, "selected": m_name == mart_val})
