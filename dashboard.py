@@ -50,16 +50,25 @@ PALETTE = [FB_BLUE, FB_GREEN, "#F7B928", FB_RED, "#9B59B6",
 
 st.markdown(f"""
 <style>
-    /* Background */
+    /* ── App background ──────────────────────────────────────────────────── */
     .stApp {{ background-color: {FB_BG}; }}
 
-    /* Sidebar */
+    /* ── Sidebar ─────────────────────────────────────────────────────────── */
     section[data-testid="stSidebar"] {{
         background-color: {FB_CARD};
         border-right: 1px solid {FB_BORDER};
     }}
 
-    /* Metric cards */
+    /* ── General text (scoped — not global div/span to avoid killing inputs) */
+    h1 {{ color: {FB_DARK} !important; font-size:1.75rem !important;
+          font-weight:800 !important; letter-spacing:-0.5px; }}
+    h2, h3 {{ color: {FB_DARK} !important; font-weight:700 !important; }}
+    p, li {{ color: {FB_DARK} !important; }}
+    label {{ color: {FB_DARK} !important; font-weight: 500; }}
+    .stMarkdown p {{ color: {FB_DARK} !important; font-size:0.95rem; }}
+    .stCaptionContainer p {{ color: {FB_GREY} !important; font-size:0.83rem !important; }}
+
+    /* ── Metric cards ────────────────────────────────────────────────────── */
     [data-testid="stMetric"] {{
         background: {FB_CARD};
         border: 1px solid {FB_BORDER};
@@ -67,7 +76,7 @@ st.markdown(f"""
         padding: 16px 20px;
         box-shadow: 0 2px 8px rgba(0,0,0,0.07);
     }}
-    [data-testid="stMetricLabel"] {{
+    [data-testid="stMetricLabel"] p {{
         color: {FB_GREY} !important;
         font-size: 0.78rem !important;
         font-weight: 600 !important;
@@ -80,7 +89,7 @@ st.markdown(f"""
         font-weight: 700 !important;
     }}
 
-    /* Tab bar */
+    /* ── Tab bar ─────────────────────────────────────────────────────────── */
     .stTabs [data-baseweb="tab-list"] {{
         background: {FB_CARD};
         border-radius: 10px;
@@ -92,7 +101,7 @@ st.markdown(f"""
     .stTabs [data-baseweb="tab"] {{
         border-radius: 8px;
         font-weight: 600;
-        color: {FB_GREY};
+        color: {FB_DARK} !important;
         padding: 8px 18px;
     }}
     .stTabs [aria-selected="true"] {{
@@ -100,10 +109,94 @@ st.markdown(f"""
         color: white !important;
     }}
 
-    /* Primary button */
+    /* ── All input containers — WHITE background, DARK text ─────────────── */
+    /* Selectbox, multiselect, number input, text input */
+    [data-baseweb="select"],
+    [data-baseweb="select"] > div,
+    [data-baseweb="input"],
+    [data-baseweb="input"] > div {{
+        background-color: {FB_CARD} !important;
+        border-color: {FB_BORDER} !important;
+    }}
+    /* The visible text inside any select/input */
+    [data-baseweb="select"] span,
+    [data-baseweb="select"] input,
+    [data-baseweb="select"] div[class*="placeholder"],
+    [data-baseweb="input"] input {{
+        color: {FB_DARK} !important;
+        background-color: transparent !important;
+    }}
+
+    /* ── Multiselect tags (selected items) ───────────────────────────────── */
+    [data-baseweb="tag"] {{
+        background-color: #E7F3FF !important;
+        border: 1px solid {FB_BLUE} !important;
+        border-radius: 6px !important;
+    }}
+    [data-baseweb="tag"] span {{
+        color: {FB_BLUE} !important;
+        font-weight: 600;
+    }}
+    /* X button on tags */
+    [data-baseweb="tag"] [role="presentation"] span {{
+        color: {FB_BLUE} !important;
+    }}
+
+    /* ── Dropdown menu (the open list) ───────────────────────────────────── */
+    [data-baseweb="menu"],
+    [data-baseweb="popover"] > div {{
+        background-color: {FB_CARD} !important;
+        border: 1px solid {FB_BORDER} !important;
+        border-radius: 10px !important;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
+    }}
+    [data-baseweb="menu"] li,
+    [data-baseweb="menu"] [role="option"] {{
+        color: {FB_DARK} !important;
+        background-color: {FB_CARD} !important;
+    }}
+    [data-baseweb="menu"] li:hover,
+    [data-baseweb="menu"] [role="option"]:hover,
+    [data-baseweb="menu"] [aria-selected="true"] {{
+        background-color: #E7F3FF !important;
+        color: {FB_BLUE} !important;
+    }}
+
+    /* ── Number / text inputs ────────────────────────────────────────────── */
+    [data-testid="stNumberInput"] input,
+    [data-testid="stTextInput"] input {{
+        color: {FB_DARK} !important;
+        background-color: {FB_CARD} !important;
+        border-color: {FB_BORDER} !important;
+        border-radius: 8px !important;
+    }}
+
+    /* ── Sliders ─────────────────────────────────────────────────────────── */
+    [data-testid="stSlider"] p {{ color: {FB_DARK} !important; }}
+    [data-testid="stSlider"] [data-testid="stTickBarMin"],
+    [data-testid="stSlider"] [data-testid="stTickBarMax"] {{
+        color: {FB_GREY} !important;
+    }}
+
+    /* ── Checkboxes ──────────────────────────────────────────────────────── */
+    [data-testid="stCheckbox"] span {{ color: {FB_DARK} !important; }}
+
+    /* ── Radio buttons ───────────────────────────────────────────────────── */
+    [data-testid="stRadio"] label span {{ color: {FB_DARK} !important; }}
+
+    /* ── Plotly chart panels ─────────────────────────────────────────────── */
+    [data-testid="stPlotlyChart"] {{
+        background: {FB_CARD};
+        border: 1px solid {FB_BORDER};
+        border-radius: 12px;
+        padding: 10px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }}
+
+    /* ── Primary button ──────────────────────────────────────────────────── */
     .stButton > button[kind="primary"] {{
         background: {FB_BLUE};
-        color: white;
+        color: white !important;
         border: none;
         border-radius: 8px;
         font-weight: 700;
@@ -113,67 +206,20 @@ st.markdown(f"""
     }}
     .stButton > button[kind="primary"]:hover {{ background: #166FE5; }}
 
-    /* Headings */
-    h1 {{
+    /* ── Secondary / normal buttons ──────────────────────────────────────── */
+    .stButton > button {{
         color: {FB_DARK} !important;
-        font-size: 1.75rem !important;
-        font-weight: 800 !important;
-        letter-spacing: -0.5px;
-    }}
-    h2, h3 {{
-        color: {FB_DARK} !important;
-        font-weight: 700 !important;
-    }}
-
-    /* Plotly panels */
-    [data-testid="stPlotlyChart"] {{
-        background: {FB_CARD};
-        border: 1px solid {FB_BORDER};
-        border-radius: 12px;
-        padding: 10px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-    }}
-
-    hr {{ border-color: {FB_BORDER} !important; }}
-
-    /* Body text — force readable colour everywhere */
-    body, p, li, span, label, div {{
-        color: {FB_DARK};
-    }}
-    .stMarkdown p, .stMarkdown li {{
-        color: {FB_DARK} !important;
-        font-size: 0.95rem;
-    }}
-    /* Sidebar labels */
-    section[data-testid="stSidebar"] label,
-    section[data-testid="stSidebar"] p,
-    section[data-testid="stSidebar"] span {{
-        color: {FB_DARK} !important;
-    }}
-    /* Selectbox / number input text */
-    [data-testid="stSelectbox"] span,
-    [data-testid="stNumberInput"] input {{
-        color: {FB_DARK} !important;
-    }}
-    /* Caption text */
-    .stCaptionContainer p {{
-        color: {FB_GREY} !important;
-        font-size: 0.83rem !important;
-    }}
-    /* Dataframe text */
-    [data-testid="stDataFrame"] {{
-        color: {FB_DARK} !important;
-    }}
-
-    /* Success/info boxes */
-    .stSuccess {{
-        background: #E7F3FF !important;
-        border-left: 4px solid {FB_BLUE} !important;
-        border-radius: 6px;
-    }}
-    div[data-testid="stAlert"] {{
+        background: {FB_CARD} !important;
+        border: 1px solid {FB_BORDER} !important;
         border-radius: 8px;
     }}
+
+    /* ── Alert / info / success boxes ───────────────────────────────────── */
+    div[data-testid="stAlert"] {{ border-radius: 8px; }}
+    div[data-testid="stAlert"] p {{ color: inherit !important; }}
+
+    /* ── Divider ─────────────────────────────────────────────────────────── */
+    hr {{ border-color: {FB_BORDER} !important; }}
 </style>
 """, unsafe_allow_html=True)
 
