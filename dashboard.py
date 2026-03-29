@@ -264,49 +264,79 @@ def _chart_layout(**kw):
 
 @st.cache_data
 def load_data():
-    df = pd.read_csv(BASE / "sold_lots.csv")
-    df["price_num"]            = df["price"].apply(parse_eur)
-    df["weight"]               = pd.to_numeric(df["weight"], errors="coerce")
-    df["age_months"]           = pd.to_numeric(df["age_months"], errors="coerce")
-    df["days_in_herd"]         = pd.to_numeric(df["days_in_herd"], errors="coerce")
-    df["no_of_owners"]         = pd.to_numeric(df["no_of_owners"], errors="coerce")
-    df["price_per_kg_num"]     = df["price_num"] / df["weight"].replace(0, np.nan)
-    df["icbf_cbv_num"]         = df["icbf_cbv"].apply(parse_eur)
-    df["icbf_replacement_num"] = df["icbf_replacement_index"].apply(parse_eur)
-    df["icbf_ebi_num"]         = df["icbf_ebi"].apply(parse_eur)
-    df["icbf_stars"]           = df["icbf_across_breed"].apply(count_stars)
-    df["has_genomic"]          = (df["icbf_genomic_eval"] == "Yes").astype(int)
-    df["quality_assured"]      = (df["quality_assurance"] == "Yes").astype(int)
-    df["bvd_ok"]               = (df["bvd_tested"] == "Yes").astype(int)
-    df["export_score"]         = df["export_status"].apply(export_score_fn)
-    df["sex_clean"]            = df["sex"].map({"M": "M", "F": "F", "B": "B"}).fillna("Unknown")
-    sale_dt                    = pd.to_datetime(df["scraped_date"], errors="coerce")
-    df["sale_date"]            = sale_dt
-    df["sale_month"]           = sale_dt.dt.month.fillna(0).astype(int)
+    # ── MartBids ──────────────────────────────────────────────────────────────
+    mb = pd.read_csv(BASE / "sold_lots.csv")
+    mb["source"]               = "MartBids"
+    mb["price_num"]            = mb["price"].apply(parse_eur)
+    mb["weight"]               = pd.to_numeric(mb["weight"], errors="coerce")
+    mb["age_months"]           = pd.to_numeric(mb["age_months"], errors="coerce")
+    mb["days_in_herd"]         = pd.to_numeric(mb["days_in_herd"], errors="coerce")
+    mb["no_of_owners"]         = pd.to_numeric(mb["no_of_owners"], errors="coerce")
+    mb["price_per_kg_num"]     = mb["price_num"] / mb["weight"].replace(0, np.nan)
+    mb["icbf_cbv_num"]         = mb["icbf_cbv"].apply(parse_eur)
+    mb["icbf_replacement_num"] = mb["icbf_replacement_index"].apply(parse_eur)
+    mb["icbf_ebi_num"]         = mb["icbf_ebi"].apply(parse_eur)
+    mb["icbf_stars"]           = mb["icbf_across_breed"].apply(count_stars)
+    mb["has_genomic"]          = (mb["icbf_genomic_eval"] == "Yes").astype(int)
+    mb["quality_assured"]      = (mb["quality_assurance"] == "Yes").astype(int)
+    mb["bvd_ok"]               = (mb["bvd_tested"] == "Yes").astype(int)
+    mb["export_score"]         = mb["export_status"].apply(export_score_fn)
+    mb["sex_clean"]            = mb["sex"].map({"M": "M", "F": "F", "B": "B"}).fillna("Unknown")
+    mb_dt                      = pd.to_datetime(mb["scraped_date"], errors="coerce")
+    mb["sale_date"]            = mb_dt
+    mb["sale_month"]           = mb_dt.dt.month.fillna(0).astype(int)
 
-    top_breeds = df["breed"].value_counts().head(20).index
+    frames = [mb]
+
+    # ── Livestock-Live ────────────────────────────────────────────────────────
+    lsl_path = BASE / "lsl_lots.csv"
+    if lsl_path.exists():
+        lsl = pd.read_csv(lsl_path)
+        lsl["source"]           = "Livestock-Live"
+        lsl["price_num"]        = pd.to_numeric(lsl["price"], errors="coerce")
+        lsl["weight"]           = pd.to_numeric(lsl["weight"], errors="coerce")
+        lsl["age_months"]       = pd.to_numeric(lsl["age_months"], errors="coerce")
+        lsl["price_per_kg_num"] = pd.to_numeric(lsl["price_per_kg"], errors="coerce")
+        lsl["icbf_stars"]       = pd.to_numeric(lsl["icbf_stars"], errors="coerce").fillna(0)
+        lsl["sex_clean"]        = lsl["sex"].map({"M": "M", "F": "F", "B": "B"}).fillna("Unknown")
+        lsl_dt                  = pd.to_datetime(lsl["sale_date"], errors="coerce")
+        lsl["sale_date"]        = lsl_dt
+        lsl["scraped_date"]     = lsl_dt
+        lsl["sale_month"]       = lsl_dt.dt.month.fillna(0).astype(int)
+        # MartBids-only columns absent from LSL → NaN
+        for col in ["days_in_herd", "no_of_owners", "dam_breed",
+                    "icbf_cbv_num", "icbf_replacement_num", "icbf_ebi_num",
+                    "has_genomic", "quality_assured", "bvd_ok", "export_score"]:
+            lsl[col] = np.nan
+        frames.append(lsl)
+
+    df = pd.concat(frames, ignore_index=True, sort=False)
+    df = df[df["price_num"] > 0].dropna(subset=["price_num", "weight"]).copy()
+
+    # ── Shared feature engineering ─────────────────────────────────────────
+    top_breeds      = df["breed"].value_counts().head(20).index
     df["breed_grp"] = df["breed"].where(df["breed"].isin(top_breeds), "Other")
     df["breed_sex"] = df["breed_grp"] + "_" + df["sex_clean"]
 
-    top_dam = df["dam_breed"].value_counts().head(15).index
-    df["dam_breed_grp"] = (df["dam_breed"]
-                           .where(df["dam_breed"].isin(top_dam), "Other")
-                           .fillna("Unknown"))
+    if "dam_breed" in df.columns:
+        top_dam = df["dam_breed"].value_counts().head(15).index
+        df["dam_breed_grp"] = (df["dam_breed"]
+                               .where(df["dam_breed"].isin(top_dam), "Other")
+                               .fillna("Unknown"))
+    else:
+        df["dam_breed_grp"] = "Unknown"
 
-    df = df[df["price_num"] > 0].dropna(subset=["price_num", "weight"]).copy()
-
+    # ── Weather merge ─────────────────────────────────────────────────────
     wx_path = BASE / "weather_cache.csv"
     if wx_path.exists():
         wx = pd.read_csv(wx_path)
         wx["date"] = pd.to_datetime(wx["date"]).dt.strftime("%Y-%m-%d")
-        df["sale_date_str"] = df["sale_date"].dt.strftime("%Y-%m-%d")
+        df["sale_date_str"] = pd.to_datetime(df["sale_date"]).dt.strftime("%Y-%m-%d")
         df = df.merge(wx.rename(columns={"date": "sale_date_str"}),
                       on=["mart", "sale_date_str"], how="left")
     else:
-        df["temp_max_c"] = np.nan
-        df["temp_min_c"] = np.nan
-        df["precipitation_mm"] = np.nan
-        df["wind_speed_kmh"] = np.nan
+        for col in ["temp_max_c", "temp_min_c", "precipitation_mm", "wind_speed_kmh"]:
+            df[col] = np.nan
 
     return df
 

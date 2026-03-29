@@ -32,6 +32,7 @@ warnings.filterwarnings("ignore")
 
 DIR        = Path(__file__).parent
 CSV_PATH   = DIR / "sold_lots.csv"
+LSL_CSV    = DIR / "lsl_lots.csv"
 WEATHER_CSV = DIR / "weather_cache.csv"
 MODEL_PATH = DIR / "cattle_model.pkl"
 META_PATH  = DIR / "model_metadata.json"
@@ -61,8 +62,33 @@ def export_score(s):
 TOP_BREEDS     = 20
 TOP_DAM_BREEDS = 15
 
-def load_and_engineer(csv_path: Path) -> pd.DataFrame:
-    df = pd.read_csv(csv_path)
+def load_combined() -> pd.DataFrame:
+    """Stack MartBids + Livestock-Live into one DataFrame."""
+    mb = pd.read_csv(CSV_PATH)
+    mb["source"] = "martbids"
+
+    if not LSL_CSV.exists():
+        return mb
+
+    lsl = pd.read_csv(LSL_CSV)
+    lsl["source"] = "lsl"
+    # Normalise price to €-string so parse_eur handles both sources uniformly
+    lsl["price"] = lsl["price"].apply(
+        lambda x: f"€{x}" if pd.notna(x) else x
+    )
+    # Map numeric icbf_stars → ☆ symbols so count_stars works unchanged
+    lsl["icbf_across_breed"] = lsl["icbf_stars"].apply(
+        lambda s: "☆" * int(float(s)) if pd.notna(s) and float(s) > 0 else ""
+    )
+    # Use actual sale_date for seasonality (more accurate than scraped_date)
+    lsl["scraped_date"] = lsl["sale_date"]
+
+    return pd.concat([mb, lsl], ignore_index=True, sort=False)
+
+
+def load_and_engineer(csv_path: Path = None, df: pd.DataFrame = None) -> pd.DataFrame:
+    if df is None:
+        df = pd.read_csv(csv_path)
 
     # ── Target ────────────────────────────────────────────────────────────────
     df["price_num"] = df["price"].apply(parse_eur)
@@ -94,10 +120,15 @@ def load_and_engineer(csv_path: Path) -> pd.DataFrame:
     top_breeds  = df["breed"].value_counts().head(TOP_BREEDS).index
     df["breed_grp"] = df["breed"].where(df["breed"].isin(top_breeds), "Other")
 
-    top_dam = df["dam_breed"].value_counts().head(TOP_DAM_BREEDS).index
-    df["dam_breed_grp"] = (df["dam_breed"]
-                           .where(df["dam_breed"].isin(top_dam), "Other")
-                           .fillna("Unknown"))
+    if "dam_breed" in df.columns:
+        top_dam = df["dam_breed"].value_counts().head(TOP_DAM_BREEDS).index
+        df["dam_breed_grp"] = (df["dam_breed"]
+                               .where(df["dam_breed"].isin(top_dam), "Other")
+                               .fillna("Unknown"))
+    else:
+        df["dam_breed_grp"] = "Unknown"
+
+    df["source"] = df["source"].fillna("martbids") if "source" in df.columns else "martbids"
 
     df["sex_clean"] = df["sex"].map({"M": "M", "F": "F", "B": "B"}).fillna("Unknown")
 
@@ -135,7 +166,7 @@ NUMERIC_FEATURES = [
     "sale_month",
 ]
 
-CATEGORICAL_FEATURES = ["breed_grp", "sex_clean", "mart", "dam_breed_grp", "breed_sex"]
+CATEGORICAL_FEATURES = ["breed_grp", "sex_clean", "mart", "dam_breed_grp", "breed_sex", "source"]
 
 ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 TARGET       = "ppkg"
@@ -212,8 +243,11 @@ def compute_metrics(y_true, y_pred, label=""):
 
 def main():
     print("Loading data…")
-    df = load_and_engineer(CSV_PATH)
+    df = load_and_engineer(df=load_combined())
     print(f"  {len(df):,} rows after cleaning")
+    if "source" in df.columns:
+        for src, cnt in df["source"].value_counts().items():
+            print(f"    {src}: {cnt:,}")
 
     X = df[ALL_FEATURES]
     y = df[TARGET]
