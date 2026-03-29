@@ -71,4 +71,5 @@ MART_COORDS = {
     "Rathfriland":       (54.2356, -6.2164),
     "Scarriff":          (52.9068, -8.5325),
     "Ballymahon LWFM":   (53.5596, -7.7615),
+    "Templemore":        (52.7961, -7.8336),
 }
