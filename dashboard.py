@@ -1,6 +1,6 @@
 """
-MartBids Cattle Price Dashboard
-================================
+MartIndex — Irish Cattle Market Intelligence
+============================================
 Run with:  streamlit run dashboard.py
 """
 
@@ -27,7 +27,7 @@ warnings.filterwarnings("ignore")
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="MartBids",
+    page_title="MartIndex",
     page_icon="🐄",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -35,18 +35,19 @@ st.set_page_config(
 
 BASE = Path(__file__).parent
 
-# ── Facebook colour palette ───────────────────────────────────────────────────
-FB_BLUE   = "#1877F2"
-FB_DARK   = "#1C1E21"
-FB_BG     = "#F0F2F5"
-FB_CARD   = "#FFFFFF"
-FB_GREY   = "#4B4F56"   # darkened for readability
-FB_GREEN  = "#42B72A"
-FB_RED    = "#FA383E"
-FB_BORDER = "#CED0D4"
+# ── MartIndex colour palette ──────────────────────────────────────────────────
+FB_BLUE   = "#1B2A4A"   # primary navy
+FB_DARK   = "#1B2A4A"   # text / headings
+FB_BG     = "#F4F5F7"   # page background
+FB_CARD   = "#FFFFFF"   # card / panel background
+FB_GREY   = "#6B7280"   # muted text
+FB_GREEN  = "#276749"   # positive / success
+FB_RED    = "#9B2335"   # negative / alert
+FB_BORDER = "#DDE1E7"   # borders
+GOLD      = "#C9A84C"   # accent gold
 
-PALETTE = [FB_BLUE, FB_GREEN, "#F7B928", FB_RED, "#9B59B6",
-           "#00BCD4", "#FF9800", "#E91E63", "#3F51B5", "#009688"]
+PALETTE = [FB_BLUE, GOLD, FB_GREEN, FB_RED, "#4B5EA6",
+           "#7C6A3A", "#5B8A6A", "#8B3A4A", "#2E4A7A", "#A08030"]
 
 st.markdown(f"""
 <style>
@@ -58,107 +59,136 @@ st.markdown(f"""
         background-color: {FB_CARD};
         border-right: 1px solid {FB_BORDER};
     }}
+    section[data-testid="stSidebar"] > div {{ padding-top: 1rem; }}
 
-    /* ── General text (scoped — not global div/span to avoid killing inputs) */
-    h1 {{ color: {FB_DARK} !important; font-size:1.75rem !important;
-          font-weight:800 !important; letter-spacing:-0.5px; }}
-    h2, h3 {{ color: {FB_DARK} !important; font-weight:700 !important; }}
-    p, li {{ color: {FB_DARK} !important; }}
+    /* ── Typography (scoped — not applied inside widgets) ────────────────── */
+    h1 {{ color: {FB_DARK} !important; font-size: 1.7rem !important;
+          font-weight: 800 !important; letter-spacing: -0.5px; }}
+    h2, h3 {{ color: {FB_DARK} !important; font-weight: 700 !important; }}
     label {{ color: {FB_DARK} !important; font-weight: 500; }}
-    .stMarkdown p {{ color: {FB_DARK} !important; font-size:0.95rem; }}
-    .stCaptionContainer p {{ color: {FB_GREY} !important; font-size:0.83rem !important; }}
+    .stMarkdown p {{ color: {FB_DARK} !important; font-size: 0.95rem; }}
+    .stCaptionContainer p {{ color: {FB_GREY} !important; font-size: 0.82rem !important; }}
 
     /* ── Metric cards ────────────────────────────────────────────────────── */
     [data-testid="stMetric"] {{
         background: {FB_CARD};
         border: 1px solid {FB_BORDER};
         border-radius: 12px;
-        padding: 16px 20px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+        padding: 14px 18px;
+        box-shadow: 0 1px 6px rgba(27,42,74,0.08);
     }}
     [data-testid="stMetricLabel"] p {{
         color: {FB_GREY} !important;
-        font-size: 0.78rem !important;
+        font-size: 0.75rem !important;
         font-weight: 600 !important;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.6px;
     }}
     [data-testid="stMetricValue"] {{
         color: {FB_DARK} !important;
-        font-size: 1.55rem !important;
+        font-size: 1.5rem !important;
         font-weight: 700 !important;
     }}
+    [data-testid="stMetricDelta"] svg {{ display: none; }}
 
-    /* ── Tab bar ─────────────────────────────────────────────────────────── */
+    /* ── Tabs ────────────────────────────────────────────────────────────── */
     .stTabs [data-baseweb="tab-list"] {{
         background: {FB_CARD};
         border-radius: 10px;
-        padding: 6px;
-        gap: 4px;
+        padding: 5px;
+        gap: 3px;
         border: 1px solid {FB_BORDER};
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        box-shadow: 0 1px 4px rgba(27,42,74,0.06);
+        flex-wrap: wrap;
     }}
+    /* Unselected tab */
     .stTabs [data-baseweb="tab"] {{
-        border-radius: 8px;
-        font-weight: 600;
+        border-radius: 7px;
+        padding: 7px 14px;
+        white-space: nowrap;
+        background: transparent !important;
+    }}
+    .stTabs [data-baseweb="tab"] p,
+    .stTabs [data-baseweb="tab"] span,
+    .stTabs [data-baseweb="tab"] div {{
         color: {FB_DARK} !important;
-        padding: 8px 18px;
+        font-weight: 600 !important;
+        font-size: 0.88rem !important;
     }}
-    .stTabs [aria-selected="true"] {{
+    /* Selected tab */
+    .stTabs [data-baseweb="tab"][aria-selected="true"] {{
         background: {FB_BLUE} !important;
-        color: white !important;
     }}
+    .stTabs [data-baseweb="tab"][aria-selected="true"] p,
+    .stTabs [data-baseweb="tab"][aria-selected="true"] span,
+    .stTabs [data-baseweb="tab"][aria-selected="true"] div {{
+        color: #FFFFFF !important;
+    }}
+    /* Remove the default underline indicator */
+    .stTabs [data-baseweb="tab-highlight"] {{ display: none !important; }}
+    .stTabs [data-baseweb="tab-border"] {{ display: none !important; }}
 
-    /* ── All input containers — WHITE background, DARK text ─────────────── */
-    /* Selectbox, multiselect, number input, text input */
-    [data-baseweb="select"],
-    [data-baseweb="select"] > div,
-    [data-baseweb="input"],
-    [data-baseweb="input"] > div {{
+    /* ── Input controls (select box / multiselect outer shell) ───────────── */
+    [data-baseweb="select"] > div:first-child,
+    [data-baseweb="input"] > div:first-child {{
         background-color: {FB_CARD} !important;
         border-color: {FB_BORDER} !important;
+        border-radius: 8px !important;
     }}
-    /* The visible text inside any select/input */
-    [data-baseweb="select"] span,
+    /* All text inside any select control — value, placeholder, options */
+    [data-baseweb="select"] *,
     [data-baseweb="select"] input,
-    [data-baseweb="select"] div[class*="placeholder"],
-    [data-baseweb="input"] input {{
+    [data-baseweb="select"] span,
+    [data-baseweb="select"] div,
+    [data-baseweb="select"] p {{
         color: {FB_DARK} !important;
         background-color: transparent !important;
     }}
+    /* Single-value display (selectbox chosen item) */
+    [data-baseweb="select"] [data-testid="stSelectbox"],
+    [data-baseweb="select"] [class*="singleValue"],
+    [data-baseweb="select"] [class*="SingleValue"] {{
+        color: {FB_DARK} !important;
+    }}
 
-    /* ── Multiselect tags (selected items) ───────────────────────────────── */
+    /* ── Multiselect tags ────────────────────────────────────────────────── */
     [data-baseweb="tag"] {{
-        background-color: #E7F3FF !important;
+        background-color: #EEF2F8 !important;
         border: 1px solid {FB_BLUE} !important;
         border-radius: 6px !important;
     }}
-    [data-baseweb="tag"] span {{
-        color: {FB_BLUE} !important;
-        font-weight: 600;
-    }}
-    /* X button on tags */
-    [data-baseweb="tag"] [role="presentation"] span {{
-        color: {FB_BLUE} !important;
-    }}
+    [data-baseweb="tag"] span {{ color: {FB_BLUE} !important; font-weight: 600; }}
 
-    /* ── Dropdown menu (the open list) ───────────────────────────────────── */
-    [data-baseweb="menu"],
-    [data-baseweb="popover"] > div {{
+    /* ── Dropdown list (the popover that opens on click) ─────────────────── */
+    [data-baseweb="popover"],
+    [data-baseweb="popover"] > div,
+    [data-baseweb="menu"] {{
         background-color: {FB_CARD} !important;
         border: 1px solid {FB_BORDER} !important;
         border-radius: 10px !important;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
+        box-shadow: 0 4px 20px rgba(27,42,74,0.14) !important;
     }}
+    /* Each option row */
     [data-baseweb="menu"] li,
-    [data-baseweb="menu"] [role="option"] {{
-        color: {FB_DARK} !important;
+    [data-baseweb="menu"] [role="option"],
+    [data-baseweb="list"] li {{
         background-color: {FB_CARD} !important;
+        color: {FB_DARK} !important;
     }}
+    /* Option text spans */
+    [data-baseweb="menu"] li span,
+    [data-baseweb="menu"] [role="option"] span,
+    [data-baseweb="menu"] li div,
+    [data-baseweb="menu"] [role="option"] div {{
+        color: {FB_DARK} !important;
+    }}
+    /* Hover / selected option */
     [data-baseweb="menu"] li:hover,
     [data-baseweb="menu"] [role="option"]:hover,
-    [data-baseweb="menu"] [aria-selected="true"] {{
-        background-color: #E7F3FF !important;
+    [data-baseweb="menu"] [aria-selected="true"],
+    [data-baseweb="menu"] li[aria-selected="true"] span,
+    [data-baseweb="menu"] li:hover span {{
+        background-color: #EEF2F8 !important;
         color: {FB_BLUE} !important;
     }}
 
@@ -175,13 +205,11 @@ st.markdown(f"""
     [data-testid="stSlider"] p {{ color: {FB_DARK} !important; }}
     [data-testid="stSlider"] [data-testid="stTickBarMin"],
     [data-testid="stSlider"] [data-testid="stTickBarMax"] {{
-        color: {FB_GREY} !important;
+        color: {FB_GREY} !important; font-size: 0.78rem;
     }}
 
-    /* ── Checkboxes ──────────────────────────────────────────────────────── */
+    /* ── Checkboxes / radio ──────────────────────────────────────────────── */
     [data-testid="stCheckbox"] span {{ color: {FB_DARK} !important; }}
-
-    /* ── Radio buttons ───────────────────────────────────────────────────── */
     [data-testid="stRadio"] label span {{ color: {FB_DARK} !important; }}
 
     /* ── Plotly chart panels ─────────────────────────────────────────────── */
@@ -189,24 +217,29 @@ st.markdown(f"""
         background: {FB_CARD};
         border: 1px solid {FB_BORDER};
         border-radius: 12px;
-        padding: 10px;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        padding: 8px;
+        box-shadow: 0 1px 4px rgba(27,42,74,0.06);
     }}
 
-    /* ── Primary button ──────────────────────────────────────────────────── */
+    /* ── Dataframes ──────────────────────────────────────────────────────── */
+    [data-testid="stDataFrame"] {{
+        border: 1px solid {FB_BORDER} !important;
+        border-radius: 10px !important;
+        overflow: hidden;
+    }}
+
+    /* ── Buttons ─────────────────────────────────────────────────────────── */
     .stButton > button[kind="primary"] {{
         background: {FB_BLUE};
         color: white !important;
         border: none;
         border-radius: 8px;
         font-weight: 700;
-        padding: 10px 28px;
-        font-size: 1rem;
-        transition: background 0.15s;
+        padding: 10px 26px;
+        font-size: 0.95rem;
+        transition: opacity 0.15s;
     }}
-    .stButton > button[kind="primary"]:hover {{ background: #166FE5; }}
-
-    /* ── Secondary / normal buttons ──────────────────────────────────────── */
+    .stButton > button[kind="primary"]:hover {{ opacity: 0.88; }}
     .stButton > button {{
         color: {FB_DARK} !important;
         background: {FB_CARD} !important;
@@ -214,12 +247,28 @@ st.markdown(f"""
         border-radius: 8px;
     }}
 
-    /* ── Alert / info / success boxes ───────────────────────────────────── */
+    /* ── Alert boxes ─────────────────────────────────────────────────────── */
     div[data-testid="stAlert"] {{ border-radius: 8px; }}
-    div[data-testid="stAlert"] p {{ color: inherit !important; }}
 
     /* ── Divider ─────────────────────────────────────────────────────────── */
-    hr {{ border-color: {FB_BORDER} !important; }}
+    hr {{ border-color: {FB_BORDER} !important; margin: 1rem 0; }}
+
+    /* ── Mobile responsive ───────────────────────────────────────────────── */
+    @media (max-width: 768px) {{
+        h1 {{ font-size: 1.35rem !important; }}
+        h2, h3 {{ font-size: 1.05rem !important; }}
+        [data-testid="stMetricValue"] {{ font-size: 1.2rem !important; }}
+        [data-testid="stMetricLabel"] p {{ font-size: 0.68rem !important; }}
+        .stTabs [data-baseweb="tab"] {{
+            padding: 6px 10px;
+        }}
+        .stTabs [data-baseweb="tab"] p,
+        .stTabs [data-baseweb="tab"] span {{
+            font-size: 0.78rem !important;
+        }}
+        [data-testid="stPlotlyChart"] {{ padding: 4px; }}
+        section[data-testid="stSidebar"] {{ min-width: 240px !important; }}
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -241,23 +290,42 @@ def export_score_fn(s):
 NUMERIC_FEATURES = [
     "weight", "age_months", "days_in_herd", "no_of_owners",
     "icbf_cbv_num", "icbf_replacement_num", "icbf_ebi_num", "icbf_stars",
+    "log_weight", "weight_per_month", "icbf_has_data",
     "has_genomic", "quality_assured", "bvd_ok", "export_score",
     "temp_max_c", "temp_min_c", "precipitation_mm", "wind_speed_kmh",
     "sale_month",
 ]
-CATEGORICAL_FEATURES = ["breed_grp", "sex_clean", "mart", "dam_breed_grp", "breed_sex"]
+CATEGORICAL_FEATURES = ["breed_grp", "sex_clean", "mart", "dam_breed_grp", "breed_sex", "source"]
 ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
 
 def _chart_layout(**kw):
-    """Common Plotly layout defaults matching the FB theme."""
+    """Common Plotly layout defaults — explicit colours so dark-mode never bleeds in."""
     base = dict(
-        plot_bgcolor="white",
-        paper_bgcolor="white",
+        plot_bgcolor="#FFFFFF",
+        paper_bgcolor="#FFFFFF",
         font=dict(color=FB_DARK, family="system-ui, -apple-system, sans-serif"),
+        title_font=dict(color=FB_DARK),
     )
     base.update(kw)
     return base
+
+
+def _show_chart(fig):
+    """Apply axis colours then render — use everywhere instead of st.plotly_chart."""
+    fig.update_xaxes(
+        tickfont=dict(color=FB_DARK),
+        gridcolor="#EAECEF",
+        linecolor=FB_BORDER,
+        zerolinecolor="#EAECEF",
+    )
+    fig.update_yaxes(
+        tickfont=dict(color=FB_DARK),
+        gridcolor="#EAECEF",
+        linecolor=FB_BORDER,
+        zerolinecolor="#EAECEF",
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────
@@ -312,6 +380,20 @@ def load_data():
 
     df = pd.concat(frames, ignore_index=True, sort=False)
     df = df[df["price_num"] > 0].dropna(subset=["price_num", "weight"]).copy()
+
+    # ── Global hard filters ────────────────────────────────────────────────
+    df = df[df["weight"] > 0].copy()
+    df = df[df["price_num"] <= 10_000].copy()                  # remove outliers
+    df = df[df["age_months"].isna() | (df["age_months"] <= 96)].copy()  # max 8 years
+
+    # ── Clean invalid breed codes (pure numbers, single chars, blanks) ─────
+    df["breed"] = df["breed"].astype(str).str.strip()
+    df.loc[
+        df["breed"].str.fullmatch(r'\d+') |
+        (df["breed"].str.len() < 2) |
+        df["breed"].isin(["", "nan", "None"]),
+        "breed"
+    ] = np.nan
 
     # ── Shared feature engineering ─────────────────────────────────────────
     top_breeds      = df["breed"].value_counts().head(20).index
@@ -431,10 +513,8 @@ def project_weight(cur_weight, cur_age, months_ahead, _a, b):
 def sidebar_filters(df):
     st.sidebar.markdown(f"""
     <div style="display:flex;align-items:center;gap:10px;padding:8px 0 16px;">
-      <div style="background:{FB_BLUE};border-radius:10px;width:38px;height:38px;
-                  display:flex;align-items:center;justify-content:center;font-size:1.3rem;">🐄</div>
       <div>
-        <div style="font-size:1.1rem;font-weight:800;color:{FB_DARK};">MartBids</div>
+        <div style="font-size:1.1rem;font-weight:800;color:{FB_DARK};">MartIndex</div>
         <div style="font-size:0.72rem;color:{FB_GREY};">Irish Cattle Intelligence</div>
       </div>
     </div>
@@ -503,7 +583,7 @@ def tab_overview(df):
         fig.update_traces(textposition="outside")
         fig.update_layout(coloraxis_showscale=False, height=520,
                           margin=dict(l=10, r=80), **_chart_layout())
-        st.plotly_chart(fig, width="stretch")
+        _show_chart(fig)
 
     with col_b:
         breed_stats = (df.groupby("breed")
@@ -523,7 +603,7 @@ def tab_overview(df):
             color_discrete_sequence=PALETTE,
         )
         fig2.update_layout(height=520, showlegend=False, **_chart_layout())
-        st.plotly_chart(fig2, width="stretch")
+        _show_chart(fig2)
 
     col_c, col_d = st.columns(2)
 
@@ -541,7 +621,7 @@ def tab_overview(df):
         )
         fig3.update_traces(textposition="outside")
         fig3.update_layout(showlegend=False, height=360, **_chart_layout())
-        st.plotly_chart(fig3, width="stretch")
+        _show_chart(fig3)
 
     with col_d:
         top_breed_vol = df["breed"].value_counts().head(12).reset_index()
@@ -552,7 +632,7 @@ def tab_overview(df):
             color_discrete_sequence=PALETTE, hole=0.38,
         )
         fig4.update_layout(height=360, **_chart_layout())
-        st.plotly_chart(fig4, width="stretch")
+        _show_chart(fig4)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -571,6 +651,7 @@ def tab_explorer(df):
 
     size_col = None if size_by == "None" else size_by
     plot_df  = df.dropna(subset=["weight", "price_num"])
+    plot_df  = plot_df[(plot_df["weight"] > 0) & (plot_df["price_num"] > 0)]
     if size_col:
         plot_df = plot_df.dropna(subset=[size_col])
 
@@ -589,9 +670,10 @@ def tab_explorer(df):
         color_discrete_sequence=PALETTE,
         height=560,
     )
-    fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.01),
+    fig.update_layout(legend=dict(orientation="h", yanchor="bottom", y=1.01,
+                                   font=dict(color=FB_DARK)),
                       **_chart_layout())
-    st.plotly_chart(fig, width="stretch")
+    _show_chart(fig)
 
     col_a, col_b = st.columns(2)
     with col_a:
@@ -602,20 +684,21 @@ def tab_explorer(df):
             color_discrete_sequence=PALETTE,
         )
         fig2.update_layout(height=380, **_chart_layout())
-        st.plotly_chart(fig2, width="stretch")
+        _show_chart(fig2)
 
     with col_b:
         fig3 = px.histogram(
-            df, x="price_per_kg_num", nbins=60, color="sex_clean", barmode="overlay",
+            df[df["price_per_kg_num"] > 0], x="price_per_kg_num", nbins=60, color="sex_clean", barmode="overlay",
             opacity=0.7, title="Price per KG Distribution by Sex",
             labels={"price_per_kg_num": "Price per KG (€)", "sex_clean": "Sex"},
             color_discrete_sequence=PALETTE,
         )
         fig3.update_layout(height=380, **_chart_layout())
-        st.plotly_chart(fig3, width="stretch")
+        _show_chart(fig3)
 
     st.subheader("Price per KG vs Age")
     plot_df2 = df.dropna(subset=["age_months", "price_per_kg_num"])
+    plot_df2 = plot_df2[(plot_df2["price_per_kg_num"] > 0) & (plot_df2["age_months"] > 0)]
     fig4 = px.scatter(
         plot_df2, x="age_months", y="price_per_kg_num",
         color="sex_clean", hover_name="breed",
@@ -626,7 +709,7 @@ def tab_explorer(df):
         color_discrete_sequence=PALETTE, height=440,
     )
     fig4.update_layout(**_chart_layout())
-    st.plotly_chart(fig4, width="stretch")
+    _show_chart(fig4)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -649,7 +732,7 @@ def tab_breed_mart(df):
             color_discrete_sequence=PALETTE, height=460,
         )
         fig.update_layout(showlegend=False, xaxis_tickangle=-30, **_chart_layout())
-        st.plotly_chart(fig, width="stretch")
+        _show_chart(fig)
 
     with col_b:
         ppkg = (df[df["breed"].isin(top_b)]
@@ -668,7 +751,7 @@ def tab_breed_mart(df):
         fig2.update_traces(textposition="outside")
         fig2.update_layout(coloraxis_showscale=False, height=460,
                            xaxis_tickangle=-30, **_chart_layout())
-        st.plotly_chart(fig2, width="stretch")
+        _show_chart(fig2)
 
     st.subheader("Price Distribution across Marts")
     mart_order = (df.groupby("mart")["price_num"]
@@ -681,7 +764,7 @@ def tab_breed_mart(df):
         color_discrete_sequence=PALETTE, height=500,
     )
     fig3.update_layout(showlegend=False, xaxis_tickangle=-35, **_chart_layout())
-    st.plotly_chart(fig3, width="stretch")
+    _show_chart(fig3)
 
     st.subheader("Breed × Sex — Average Price Heatmap")
     pivot_breeds = df["breed"].value_counts().head(15).index
@@ -698,7 +781,7 @@ def tab_breed_mart(df):
         height=500,
     )
     fig4.update_layout(**_chart_layout())
-    st.plotly_chart(fig4, width="stretch")
+    _show_chart(fig4)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -760,7 +843,7 @@ def tab_tracker(df):
         yaxis_title="€ per kg",
         height=400,
         hovermode="x unified",
-        legend=dict(orientation="h", y=1.08, x=0),
+        legend=dict(orientation="h", y=1.08, x=0, font=dict(color=FB_DARK)),
         xaxis=dict(
             rangeslider=dict(visible=True, thickness=0.05, bgcolor="#F0F2F5"),
             rangeselector=dict(
@@ -778,7 +861,7 @@ def tab_tracker(df):
     )
     fig.update_xaxes(gridcolor="#F0F2F5")
     fig.update_yaxes(gridcolor="#F0F2F5")
-    st.plotly_chart(fig, width="stretch")
+    _show_chart(fig)
 
     # ── Volume bars ───────────────────────────────────────────────────────────
     fig_vol = go.Figure(go.Bar(
@@ -794,7 +877,7 @@ def tab_tracker(df):
     )
     fig_vol.update_xaxes(gridcolor="#F0F2F5")
     fig_vol.update_yaxes(gridcolor="#F0F2F5")
-    st.plotly_chart(fig_vol, width="stretch")
+    _show_chart(fig_vol)
 
     st.divider()
 
@@ -829,10 +912,10 @@ def tab_tracker(df):
         labels={"date": "Date", "avg_ppkg": "Avg €/kg", "breed": "Breed"},
         color_discrete_sequence=PALETTE, height=420,
     )
-    fig_bt.update_layout(legend=dict(orientation="h", y=1.08), **_chart_layout())
+    fig_bt.update_layout(legend=dict(orientation="h", y=1.08, font=dict(color=FB_DARK)), **_chart_layout())
     fig_bt.update_xaxes(gridcolor="#F0F2F5")
     fig_bt.update_yaxes(gridcolor="#F0F2F5")
-    st.plotly_chart(fig_bt, width="stretch")
+    _show_chart(fig_bt)
 
     if "temp_max_c" in df2.columns and df2["temp_max_c"].notna().any():
         st.subheader("Weather vs Price Correlation")
@@ -849,14 +932,14 @@ def tab_tracker(df):
                                  labels={"avg_temp": "Avg Max Temp (°C)", "avg_ppkg": "Avg €/kg"},
                                  height=350, color_discrete_sequence=[FB_BLUE])
             fig_wx1.update_layout(**_chart_layout())
-            st.plotly_chart(fig_wx1, width="stretch")
+            _show_chart(fig_wx1)
         with col_wx2:
             fig_wx2 = px.scatter(wx_ts, x="avg_rain", y="avg_ppkg", trendline="ols",
                                  title="Rainfall vs Avg €/kg",
                                  labels={"avg_rain": "Precipitation (mm)", "avg_ppkg": "Avg €/kg"},
                                  height=350, color_discrete_sequence=[FB_GREEN])
             fig_wx2.update_layout(**_chart_layout())
-            st.plotly_chart(fig_wx2, width="stretch")
+            _show_chart(fig_wx2)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -914,10 +997,12 @@ def tab_calculator(df):
         for m, wt, ag in zip(proj_months, proj_weights, proj_ages):
             future_month = (today.month + m - 1) % 12 + 1
             inp = {
-                "weight": wt, "age_months": ag,
+                "weight": wt, "log_weight": np.log1p(wt),
+                "weight_per_month": wt / max(ag, 1),
+                "age_months": ag,
                 "days_in_herd": 300, "no_of_owners": 1,
                 "icbf_cbv_num": np.nan, "icbf_replacement_num": np.nan,
-                "icbf_ebi_num": np.nan, "icbf_stars": 0,
+                "icbf_ebi_num": np.nan, "icbf_stars": 0, "icbf_has_data": 0,
                 "has_genomic": 0, "quality_assured": 1, "bvd_ok": 1, "export_score": 2,
                 "temp_max_c": mart_wx.get("temp_max_c", 15.0),
                 "temp_min_c": mart_wx.get("temp_min_c", 8.0),
@@ -950,6 +1035,7 @@ def tab_calculator(df):
     # ── Growth chart with sqrt population curve ────────────────────────────────
     comp_all = df[(df["breed_grp"] == breed_val) & (df["sex_clean"] == sex_val)] \
                  .dropna(subset=["age_months", "weight"])
+    comp_all = comp_all[(comp_all["weight"] > 0) & (comp_all["age_months"] > 0)]
     fig = go.Figure()
     if len(comp_all) > 0:
         sample = comp_all.sample(min(400, len(comp_all)), random_state=42)
@@ -980,11 +1066,11 @@ def tab_calculator(df):
     fig.update_layout(
         title=f"{breed_val} {sex_val} — Sqrt-Anchored Growth Projection",
         xaxis_title="Age (months)", yaxis_title="Weight (kg)",
-        height=480, legend=dict(orientation="h", y=1.06), **_chart_layout(),
+        height=480, legend=dict(orientation="h", y=1.06, font=dict(color=FB_DARK)), **_chart_layout(),
     )
     fig.update_xaxes(gridcolor="#F0F2F5")
     fig.update_yaxes(gridcolor="#F0F2F5")
-    st.plotly_chart(fig, use_container_width=True)
+    _show_chart(fig)
 
     if val_preds:
         col_v1, col_v2 = st.columns(2)
@@ -999,7 +1085,7 @@ def tab_calculator(df):
                              yaxis_title="€", height=300, **_chart_layout())
             fv.update_xaxes(gridcolor="#F0F2F5", tickvals=proj_months)
             fv.update_yaxes(gridcolor="#F0F2F5")
-            st.plotly_chart(fv, use_container_width=True)
+            _show_chart(fv)
         with col_v2:
             fp = go.Figure(go.Scatter(
                 x=proj_months, y=ppkg_preds, line=dict(color=FB_BLUE, width=2.5),
@@ -1010,7 +1096,7 @@ def tab_calculator(df):
                              yaxis_title="€/kg", height=300, **_chart_layout())
             fp.update_xaxes(gridcolor="#F0F2F5", tickvals=proj_months)
             fp.update_yaxes(gridcolor="#F0F2F5")
-            st.plotly_chart(fp, use_container_width=True)
+            _show_chart(fp)
 
         st.subheader("Projection Summary")
         st.dataframe(pd.DataFrame({
@@ -1057,17 +1143,20 @@ def tab_calculator(df):
                 xaxis_title="Age bracket", yaxis_title="Weight bracket",
                 height=400, **_chart_layout(),
             )
-            st.plotly_chart(fig_hm, use_container_width=True)
+            _show_chart(fig_hm)
 
         # Model-simulated monthly price (holding weight/age constant at target)
         if model and ppkg_preds:
             month_names = ["Jan","Feb","Mar","Apr","May","Jun",
                            "Jul","Aug","Sep","Oct","Nov","Dec"]
             month_ppkg = []
-            base = {"weight": target_w, "age_months": float(proj_ages[-1]),
+            base = {"weight": target_w,
+                    "log_weight": np.log1p(target_w),
+                    "weight_per_month": target_w / max(float(proj_ages[-1]), 1),
+                    "age_months": float(proj_ages[-1]),
                     "days_in_herd": 300, "no_of_owners": 1,
                     "icbf_cbv_num": np.nan, "icbf_replacement_num": np.nan,
-                    "icbf_ebi_num": np.nan, "icbf_stars": 0,
+                    "icbf_ebi_num": np.nan, "icbf_stars": 0, "icbf_has_data": 0,
                     "has_genomic": 0, "quality_assured": 1, "bvd_ok": 1, "export_score": 2,
                     "temp_max_c": 15.0, "temp_min_c": 8.0,
                     "precipitation_mm": 2.0, "wind_speed_kmh": 20.0,
@@ -1085,7 +1174,7 @@ def tab_calculator(df):
             fig_s.update_layout(title="Predicted €/kg by Sale Month (at target weight & age)",
                                 xaxis_title="Month", yaxis_title="Predicted €/kg",
                                 height=280, **_chart_layout())
-            st.plotly_chart(fig_s, use_container_width=True)
+            _show_chart(fig_s)
     else:
         st.info(f"Not enough data for {breed_val} {sex_val} to build price heatmap "
                 f"({len(bts_data)} rows, need ≥ 20).")
@@ -1136,10 +1225,13 @@ def tab_calculator(df):
         mart_rows = []
         for m_name in all_marts:
             mwx = wx.get(m_name, {})
-            inp = {"weight": target_w, "age_months": float(proj_ages[-1]),
+            inp = {"weight": target_w,
+                   "log_weight": np.log1p(target_w),
+                   "weight_per_month": target_w / max(float(proj_ages[-1]), 1),
+                   "age_months": float(proj_ages[-1]),
                    "days_in_herd": 300, "no_of_owners": 1,
                    "icbf_cbv_num": np.nan, "icbf_replacement_num": np.nan,
-                   "icbf_ebi_num": np.nan, "icbf_stars": 0,
+                   "icbf_ebi_num": np.nan, "icbf_stars": 0, "icbf_has_data": 0,
                    "has_genomic": 0, "quality_assured": 1, "bvd_ok": 1, "export_score": 2,
                    "temp_max_c": mwx.get("temp_max_c", 15.0),
                    "temp_min_c": mwx.get("temp_min_c", 8.0),
@@ -1170,7 +1262,7 @@ def tab_calculator(df):
         fig_m.update_layout(title="Predicted €/kg at Target Weight Across All Marts",
                             xaxis_title="Mart", yaxis_title="Predicted €/kg",
                             xaxis_tickangle=-40, height=400, **_chart_layout())
-        st.plotly_chart(fig_m, use_container_width=True)
+        _show_chart(fig_m)
         if best_mart != mart_val:
             sel_val = mart_df[mart_df["Mart"] == mart_val]["Pred. Value"].values[0]
             best_val = mart_df.iloc[0]["Pred. Value"]
@@ -1211,9 +1303,9 @@ def tab_calculator(df):
                              annotation_position="top")
         fig_be.update_layout(title="Market Value vs Total Cost",
                              xaxis_title="Months from now", yaxis_title="€",
-                             height=320, legend=dict(orientation="h", y=1.06),
+                             height=320, legend=dict(orientation="h", y=1.06, font=dict(color=FB_DARK)),
                              **_chart_layout())
-        st.plotly_chart(fig_be, use_container_width=True)
+        _show_chart(fig_be)
         st.dataframe(pd.DataFrame({
             "Month":      [f"+{m}m" for m in proj_months],
             "Age":        [f"{ag}m" for ag in proj_ages],
@@ -1227,21 +1319,315 @@ def tab_calculator(df):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# TAB 6 — Factory Prices
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data
+def load_factory_prices():
+    path = BASE / "factory_prices_clean.csv"
+    if not path.exists():
+        return pd.DataFrame()
+    df = pd.read_csv(path, parse_dates=["report_date"], low_memory=False)
+    df = df[df["price_euro_per_kg"].between(3, 12)].copy()
+    return df
+
+
+def tab_factory(fp: pd.DataFrame):
+    if fp.empty:
+        st.warning("factory_prices_clean.csv not found. Run prepare_factory_prices.py first.")
+        return
+
+    bpw    = fp[fp["source"] == "BeefPriceWatch"].copy()
+    latest = bpw["report_date"].max()
+    prev   = bpw[bpw["report_date"] < latest]["report_date"].max()
+
+    # Reference: R3 Steer headline (most common classification)
+    ref_latest = bpw[bpw["is_headline"] & (bpw["category"] == "Steer") & (bpw["report_date"] == latest)]
+    ref_prev   = bpw[bpw["is_headline"] & (bpw["category"] == "Steer") & (bpw["report_date"] == prev)]
+    ref_price  = ref_latest["price_euro_per_kg"].mean()
+    ref_prev_p = ref_prev["price_euro_per_kg"].mean()
+    ref_delta  = ref_price - ref_prev_p
+
+    ref_heifer = bpw[bpw["is_headline"] & (bpw["category"] == "Heifer") & (bpw["report_date"] == latest)]["price_euro_per_kg"].mean()
+    ref_cow    = bpw[bpw["is_headline"] & (bpw["category"] == "Cow")    & (bpw["report_date"] == latest)]["price_euro_per_kg"].mean()
+
+    top_factory = ref_latest.loc[ref_latest["price_euro_per_kg"].idxmax(), "factory"] if not ref_latest.empty else "—"
+    top_price   = ref_latest["price_euro_per_kg"].max()
+
+    # ── KPI row ───────────────────────────────────────────────────────────────
+    st.markdown(f"""
+    <div style="background:{FB_BLUE};border-radius:12px;padding:14px 20px;margin-bottom:18px;">
+      <div style="color:rgba(255,255,255,0.7);font-size:0.75rem;font-weight:700;
+                  text-transform:uppercase;letter-spacing:0.8px;">
+        Factory Prices — week ending {latest.strftime('%d %b %Y')}
+      </div>
+      <div style="color:white;font-size:0.82rem;margin-top:4px;opacity:0.85;">
+        R3 Steer &middot; R3 Heifer &middot; O4 Cow &middot; reference grades &middot; BeefPriceWatch (DAFM)
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("R3 Steer (avg)", f"€{ref_price:.2f}/kg",
+              delta=f"{ref_delta:+.3f} vs prev week")
+    k2.metric("R3 Heifer (avg)", f"€{ref_heifer:.2f}/kg")
+    k3.metric("Cow (avg)",       f"€{ref_cow:.2f}/kg")
+    k4.metric("Top paying factory", top_factory,
+              delta=f"€{top_price:.2f}/kg", delta_color="normal")
+
+    st.divider()
+
+    # ── Section 1: Reference price trend ─────────────────────────────────────
+    st.subheader("Reference Bullock Price Trend")
+    st.caption("R3 Steer & R3 Heifer — national avg across all factories (headline prices)")
+
+    weekly = (
+        bpw[bpw["is_headline"] & bpw["category"].isin(["Steer", "Heifer", "Cow"])]
+        .groupby(["report_date", "category"])["price_euro_per_kg"]
+        .agg(mean="mean", lo="min", hi="max")
+        .reset_index()
+    )
+
+    def _hex_rgba(hex_col: str, alpha: float = 0.12) -> str:
+        h = hex_col.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return f"rgba({r},{g},{b},{alpha})"
+
+    fig_trend = go.Figure()
+    cat_colours = {"Steer": FB_BLUE, "Heifer": GOLD, "Cow": FB_RED}
+    for cat, colour in cat_colours.items():
+        g = weekly[weekly["category"] == cat].sort_values("report_date")
+        if g.empty:
+            continue
+        fig_trend.add_trace(go.Scatter(
+            x=pd.concat([g["report_date"], g["report_date"][::-1]]),
+            y=pd.concat([g["hi"], g["lo"][::-1]]),
+            fill="toself",
+            fillcolor=_hex_rgba(colour),
+            line=dict(width=0),
+            showlegend=False, hoverinfo="skip",
+        ))
+        fig_trend.add_trace(go.Scatter(
+            x=g["report_date"], y=g["mean"],
+            mode="lines+markers",
+            line=dict(color=colour, width=2.5),
+            marker=dict(size=6, color=colour),
+            name=cat,
+            hovertemplate=f"<b>{cat}</b><br>%{{x|%d %b}}: €%{{y:.3f}}/kg<extra></extra>",
+        ))
+
+    fig_trend.update_layout(
+        height=320,
+        legend=dict(orientation="h", y=1.08, font=dict(color=FB_DARK)),
+        yaxis_title="€/kg",
+        hovermode="x unified",
+        **_chart_layout(),
+    )
+    _show_chart(fig_trend)
+
+    st.divider()
+
+    # ── Section 2: Factory price comparison ──────────────────────────────────
+    # One specific reference grade per category (as reported by BPW):
+    # Steer → R3, Heifer → R3, Cow → O4, Young Bull → U3, Bull → O2
+    REF_GRADE = {"Steer": "R3", "Heifer": "R3", "Cow": "O4", "Young Bull": "U3", "Bull": "O2"}
+
+    cat_sel = st.selectbox(
+        "Category", ["Steer", "Heifer", "Cow", "Young Bull", "Bull"],
+        key="factory_cat_sel"
+    )
+    ref_grade = REF_GRADE.get(cat_sel, "")
+
+    st.subheader(f"Factory Price Comparison — {ref_grade} {cat_sel} · Latest Week")
+    st.caption(f"Each bar is the {ref_grade} headline price reported by that factory for week ending {latest.strftime('%d %b %Y')}")
+
+    league = (
+        ref_latest if cat_sel == "Steer"
+        else bpw[bpw["is_headline"] & (bpw["category"] == cat_sel) & (bpw["report_date"] == latest)]
+    ).sort_values("price_euro_per_kg", ascending=True)
+
+    if league.empty:
+        st.info(f"No headline data for {cat_sel} in latest week.")
+    else:
+        nat_avg = league["price_euro_per_kg"].mean()
+        colours = [
+            FB_GREEN if p >= nat_avg else FB_RED
+            for p in league["price_euro_per_kg"]
+        ]
+        fig_league = go.Figure(go.Bar(
+            x=league["price_euro_per_kg"],
+            y=league["factory"],
+            orientation="h",
+            marker_color=colours,
+            text=[f"€{p:.3f}" for p in league["price_euro_per_kg"]],
+            textposition="outside",
+            hovertemplate="<b>%{y}</b><br>€%{x:.3f}/kg<extra></extra>",
+        ))
+        fig_league.add_vline(
+            x=nat_avg, line_dash="dot", line_color=FB_DARK, line_width=1.5,
+            annotation_text=f"Avg €{nat_avg:.3f}",
+            annotation_font_color=FB_DARK,
+        )
+        x_min = max(0, league["price_euro_per_kg"].min() - 1.0)
+        x_max = league["price_euro_per_kg"].max() + 0.15
+        fig_league.update_layout(
+            height=max(380, len(league) * 28),
+            xaxis=dict(title="€/kg", range=[x_min, x_max]),
+            margin=dict(l=160, r=80),
+            **_chart_layout(),
+        )
+        _show_chart(fig_league)
+
+    # ── Boxplot: price distribution by factory ────────────────────────────────
+    st.subheader("Price Distribution by Factory")
+    st.caption("All detail-grade prices for selected category · latest 4 weeks")
+
+    last4 = sorted(bpw["report_date"].unique())[-4:]
+    box_df = bpw[
+        ~bpw["is_headline"] &
+        (bpw["category"] == cat_sel) &
+        (bpw["report_date"].isin(last4))
+    ].copy()
+
+    if not box_df.empty:
+        # Sort factories by median price descending
+        order = (
+            box_df.groupby("factory")["price_euro_per_kg"]
+            .median().sort_values(ascending=False).index.tolist()
+        )
+        fig_box = go.Figure()
+        for fac in order:
+            fac_prices = box_df[box_df["factory"] == fac]["price_euro_per_kg"]
+            fig_box.add_trace(go.Box(
+                y=fac_prices,
+                name=fac,
+                marker_color=FB_BLUE,
+                line_color=FB_DARK,
+                boxmean=True,
+                hovertemplate=f"<b>{fac}</b><br>€%{{y:.3f}}/kg<extra></extra>",
+            ))
+        fig_box.update_layout(
+            showlegend=False,
+            yaxis_title="€/kg",
+            height=400,
+            **_chart_layout(),
+        )
+        _show_chart(fig_box)
+
+    st.divider()
+
+    # ── Section 3: Conformation × Fat heatmap ─────────────────────────────────
+    st.subheader("Grade Breakdown — Conformation × Fat Class")
+    st.caption("Avg €/kg by conformation and fat score across all factories · latest 4 weeks")
+
+    col_cat, col_fac = st.columns(2)
+    hm_cat = col_cat.selectbox(
+        "Category", ["Steer", "Heifer", "Cow", "Young Bull", "Bull"],
+        key="hm_cat"
+    )
+    all_factories = ["All"] + sorted(bpw["factory"].dropna().unique().tolist())
+    hm_fac = col_fac.selectbox("Factory", all_factories, key="hm_fac")
+
+    last4 = sorted(bpw["report_date"].unique())[-4:]
+    hm_df = bpw[
+        ~bpw["is_headline"] &
+        (bpw["category"] == hm_cat) &
+        (bpw["report_date"].isin(last4))
+    ].copy()
+    if hm_fac != "All":
+        hm_df = hm_df[hm_df["factory"] == hm_fac]
+
+    CONF_ORDER = ["E+","E=","E-","U+","U=","U-","R+","R=","R-","O+","O=","O-","P+","P=","P-"]
+    FAT_ORDER  = ["1-","1=","1+","2-","2=","2+","3-","3=","3+","4-","4=","4+","5-","5=","5+"]
+
+    if hm_df.empty:
+        st.info("Not enough detail data for this selection.")
+    else:
+        pivot = (
+            hm_df.groupby(["conformation", "fat_class"])["price_euro_per_kg"]
+            .mean()
+            .unstack(fill_value=None)
+        )
+        conf_idx = [c for c in CONF_ORDER if c in pivot.index]
+        fat_cols = [f for f in FAT_ORDER  if f in pivot.columns]
+        pivot = pivot.reindex(index=conf_idx, columns=fat_cols)
+
+        fig_hm = go.Figure(go.Heatmap(
+            z=pivot.values,
+            x=pivot.columns.tolist(),
+            y=pivot.index.tolist(),
+            colorscale=[[0, FB_RED], [0.5, "#F5F0E8"], [1, FB_GREEN]],
+            text=[[f"€{v:.2f}" if v == v else "" for v in row] for row in pivot.values],
+            texttemplate="%{text}",
+            hovertemplate="Conf: %{y}  Fat: %{x}<br>Avg €/kg: %{z:.3f}<extra></extra>",
+            colorbar=dict(title="€/kg", tickfont=dict(color=FB_DARK),
+                          title_font=dict(color=FB_DARK)),
+        ))
+        fig_hm.update_layout(
+            xaxis_title="Fat Class",
+            yaxis_title="Conformation",
+            height=420,
+            **_chart_layout(),
+        )
+        _show_chart(fig_hm)
+
+    st.divider()
+
+    # ── Section 4: All categories latest week side-by-side ───────────────────
+    st.subheader("All Categories — Latest Week")
+
+    all_cats = (
+        bpw[bpw["is_headline"] & (bpw["report_date"] == latest)]
+        .groupby("category")["price_euro_per_kg"]
+        .agg(mean="mean", lo="min", hi="max")
+        .reset_index()
+        .sort_values("mean", ascending=False)
+    )
+
+    fig_cats = go.Figure()
+    for _, row in all_cats.iterrows():
+        fig_cats.add_trace(go.Bar(
+            name=row["category"],
+            x=[row["category"]],
+            y=[row["mean"]],
+            error_y=dict(
+                type="data",
+                symmetric=False,
+                array=[row["hi"] - row["mean"]],
+                arrayminus=[row["mean"] - row["lo"]],
+                color=FB_GREY,
+            ),
+            marker_color=cat_colours.get(row["category"], FB_BLUE),
+            text=f"€{row['mean']:.3f}",
+            textposition="outside",
+            hovertemplate=(
+                f"<b>{row['category']}</b><br>"
+                f"Avg: €{row['mean']:.3f}/kg<br>"
+                f"Range: €{row['lo']:.3f} – €{row['hi']:.3f}<extra></extra>"
+            ),
+        ))
+
+    fig_cats.update_layout(
+        showlegend=False,
+        yaxis_title="€/kg",
+        height=320,
+        **_chart_layout(),
+    )
+    _show_chart(fig_cats)
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def main():
     st.markdown(f"""
-    <div style="display:flex;align-items:center;gap:14px;padding:8px 0 20px;">
-      <div style="background:{FB_BLUE};border-radius:14px;width:52px;height:52px;
-                  display:flex;align-items:center;justify-content:center;font-size:1.8rem;
-                  box-shadow:0 2px 12px rgba(24,119,242,0.35);">🐄</div>
-      <div>
-        <div style="font-size:1.8rem;font-weight:900;color:{FB_DARK};
-                    letter-spacing:-0.5px;line-height:1.1;">MartBids</div>
-        <div style="font-size:0.85rem;color:{FB_GREY};font-weight:500;">
-            Irish Cattle Market Intelligence · Live data from martbids.ie
-        </div>
+    <div style="padding:8px 0 20px;">
+      <div style="font-size:1.8rem;font-weight:900;color:{FB_DARK};
+                  letter-spacing:-0.5px;line-height:1.1;">MartIndex</div>
+      <div style="font-size:0.85rem;color:{FB_GREY};font-weight:500;margin-top:2px;">
+          Irish Cattle Market Intelligence &middot; Live data from martbids.ie
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1253,12 +1639,15 @@ def main():
         st.warning("No data matches the current filters. Try widening your selection.")
         return
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    fp = load_factory_prices()
+
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📊 Market Overview",
         "🔍 Price Explorer",
         "🐄 Breed & Mart",
         "📈 Price Tracker",
         "🧮 Growth Calculator",
+        "🏭 Factory Prices",
     ])
 
     with tab1: tab_overview(df)
@@ -1266,6 +1655,7 @@ def main():
     with tab3: tab_breed_mart(df)
     with tab4: tab_tracker(df)
     with tab5: tab_calculator(df)
+    with tab6: tab_factory(fp)
 
 
 if __name__ == "__main__":

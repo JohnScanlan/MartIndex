@@ -14,12 +14,14 @@ Outputs:
 """
 
 import json
+import sys
 import warnings
 import joblib
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
 import shap
+import optuna
 from sklearn.model_selection import train_test_split, KFold, cross_val_score
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import OrdinalEncoder
@@ -28,16 +30,19 @@ from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from pathlib import Path
 
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+
 warnings.filterwarnings("ignore")
 
-DIR        = Path(__file__).parent
-CSV_PATH   = DIR / "sold_lots.csv"
-LSL_CSV    = DIR / "lsl_lots.csv"
-WEATHER_CSV = DIR / "weather_cache.csv"
-MODEL_PATH = DIR / "cattle_model.pkl"
-META_PATH  = DIR / "model_metadata.json"
+DIR           = Path(__file__).parent
+CSV_PATH      = DIR / "sold_lots.csv"
+LSL_CSV       = DIR / "lsl_lots.csv"
+WEATHER_CSV   = DIR / "weather_cache.csv"
+MODEL_PATH    = DIR / "cattle_model.pkl"
+META_PATH     = DIR / "model_metadata.json"
 SHAP_VAL_PATH = DIR / "shap_values.pkl"
 SHAP_BG_PATH  = DIR / "shap_background.pkl"
+PARAMS_PATH   = DIR / "best_params.json"
 
 
 # ── Feature helpers ───────────────────────────────────────────────────────────
@@ -135,6 +140,15 @@ def load_and_engineer(csv_path: Path = None, df: pd.DataFrame = None) -> pd.Data
     # ── Breed × Sex interaction ───────────────────────────────────────────────
     df["breed_sex"] = df["breed_grp"] + "_" + df["sex_clean"]
 
+    # ── Derived numeric features ───────────────────────────────────────────────
+    df["log_weight"]       = np.log1p(df["weight"])
+    df["weight_per_month"] = df["weight"] / df["age_months"].clip(lower=1)
+    df["icbf_has_data"]    = (
+        df["icbf_cbv_num"].notna() |
+        df["icbf_replacement_num"].notna() |
+        df["icbf_ebi_num"].notna()
+    ).astype(int)
+
     # ── Sale date & seasonality ───────────────────────────────────────────────
     sale_dt = pd.to_datetime(df["scraped_date"], errors="coerce")
     df["sale_date"]   = sale_dt.dt.strftime("%Y-%m-%d")
@@ -159,8 +173,10 @@ def load_and_engineer(csv_path: Path = None, df: pd.DataFrame = None) -> pd.Data
 # ── Feature lists ─────────────────────────────────────────────────────────────
 
 NUMERIC_FEATURES = [
-    "weight", "age_months", "days_in_herd", "no_of_owners",
+    "weight", "log_weight", "weight_per_month",
+    "age_months", "days_in_herd", "no_of_owners",
     "icbf_cbv_num", "icbf_replacement_num", "icbf_ebi_num", "icbf_stars",
+    "icbf_has_data",
     "has_genomic", "quality_assured", "bvd_ok", "export_score",
     "temp_max_c", "temp_min_c", "precipitation_mm", "wind_speed_kmh",
     "sale_month",
@@ -172,9 +188,35 @@ ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 TARGET       = "ppkg"
 
 
+# ── Default hyperparameters (conservative to avoid overfitting) ───────────────
+
+DEFAULT_PARAMS = dict(
+    n_estimators      = 1000,
+    learning_rate     = 0.03,
+    num_leaves        = 63,
+    max_depth         = -1,
+    min_child_samples = 25,
+    subsample         = 0.8,
+    colsample_bytree  = 0.8,
+    reg_alpha         = 0.2,
+    reg_lambda        = 0.2,
+    random_state      = 42,
+    n_jobs            = -1,
+    verbose           = -1,
+)
+
+
 # ── Preprocessing + model pipeline ────────────────────────────────────────────
 
-def build_pipeline():
+def build_pipeline(params: dict = None):
+    if params is None:
+        if PARAMS_PATH.exists():
+            with open(PARAMS_PATH) as f:
+                params = json.load(f)
+            print(f"  Using saved Optuna params from {PARAMS_PATH.name}")
+        else:
+            params = DEFAULT_PARAMS
+
     num_pipe = Pipeline([
         ("impute", SimpleImputer(strategy="median")),
     ])
@@ -192,25 +234,50 @@ def build_pipeline():
         ("cat", cat_pipe, CATEGORICAL_FEATURES),
     ], remainder="drop")
 
-    model = lgb.LGBMRegressor(
-        n_estimators      = 800,
-        learning_rate     = 0.04,
-        num_leaves        = 127,
-        max_depth         = -1,
-        min_child_samples = 15,
-        subsample         = 0.8,
-        colsample_bytree  = 0.8,
-        reg_alpha         = 0.1,
-        reg_lambda        = 0.1,
-        random_state      = 42,
-        n_jobs            = -1,
-        verbose           = -1,
-    )
+    model = lgb.LGBMRegressor(**params)
 
     return Pipeline([
         ("prep",  preprocessor),
         ("model", model),
     ])
+
+
+# ── Optuna hyperparameter search ──────────────────────────────────────────────
+
+def tune_hyperparams(X: pd.DataFrame, y: pd.Series, n_trials: int = 80) -> dict:
+    """Search LightGBM hyperparameters with Optuna. Returns best param dict."""
+
+    def objective(trial):
+        params = dict(
+            n_estimators      = trial.suggest_int("n_estimators", 300, 1500),
+            learning_rate     = trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
+            num_leaves        = trial.suggest_int("num_leaves", 15, 127),
+            min_child_samples = trial.suggest_int("min_child_samples", 10, 80),
+            subsample         = trial.suggest_float("subsample", 0.5, 1.0),
+            colsample_bytree  = trial.suggest_float("colsample_bytree", 0.5, 1.0),
+            reg_alpha         = trial.suggest_float("reg_alpha", 0.0, 2.0),
+            reg_lambda        = trial.suggest_float("reg_lambda", 0.0, 2.0),
+            max_depth         = -1,
+            random_state      = 42,
+            n_jobs            = -1,
+            verbose           = -1,
+        )
+        pipe = build_pipeline(params)
+        cv = KFold(n_splits=5, shuffle=True, random_state=42)
+        scores = cross_val_score(pipe, X, y, cv=cv,
+                                 scoring="neg_mean_absolute_error", n_jobs=-1)
+        return -scores.mean()
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+
+    best = study.best_params
+    best.update({"max_depth": -1, "random_state": 42, "n_jobs": -1, "verbose": -1})
+    with open(PARAMS_PATH, "w") as f:
+        json.dump(best, f, indent=2)
+    print(f"\n  Best CV MAE: €{study.best_value:.4f}/kg")
+    print(f"  Best params saved → {PARAMS_PATH.name}")
+    return best
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────────
@@ -242,6 +309,8 @@ def compute_metrics(y_true, y_pred, label=""):
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    tune = "--tune" in sys.argv
+
     print("Loading data…")
     df = load_and_engineer(df=load_combined())
     print(f"  {len(df):,} rows after cleaning")
@@ -252,6 +321,13 @@ def main():
     X = df[ALL_FEATURES]
     y = df[TARGET]
 
+    # ── Optuna tuning (optional) ───────────────────────────────────────────────
+    if tune:
+        print(f"\nRunning Optuna search (80 trials)…")
+        best_params = tune_hyperparams(X, y, n_trials=80)
+    else:
+        best_params = None   # build_pipeline will load saved or use defaults
+
     # ── Train / test split ────────────────────────────────────────────────────
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42)
@@ -260,7 +336,7 @@ def main():
 
     # ── Fit pipeline ──────────────────────────────────────────────────────────
     print("\nTraining LightGBM pipeline…")
-    pipeline = build_pipeline()
+    pipeline = build_pipeline(best_params)
     pipeline.fit(X_train, y_train)
 
     # ── Evaluate ──────────────────────────────────────────────────────────────
