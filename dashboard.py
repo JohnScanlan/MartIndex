@@ -698,7 +698,7 @@ def tab_explorer(df):
 
     st.subheader("Price per KG vs Age")
     plot_df2 = df.dropna(subset=["age_months", "price_per_kg_num"])
-    plot_df2 = plot_df2[(plot_df2["price_per_kg_num"] > 0) & (plot_df2["age_months"] > 0)]
+    plot_df2 = plot_df2[(plot_df2["price_per_kg_num"] > 0) & (plot_df2["age_months"] > 0) & (plot_df2["price_per_kg_num"] < 12)]
     fig4 = px.scatter(
         plot_df2, x="age_months", y="price_per_kg_num",
         color="sex_clean", hover_name="breed",
