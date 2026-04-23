@@ -385,6 +385,7 @@ def load_data():
     df = df[df["weight"] > 0].copy()
     df = df[df["price_num"] <= 10_000].copy()                  # remove outliers
     df = df[df["age_months"].isna() | (df["age_months"] <= 96)].copy()  # max 8 years
+    df = df[df["sex_clean"] != "Unknown"].copy()                         # known sex only
 
     # ── Clean invalid breed codes (pure numbers, single chars, blanks) ─────
     df["breed"] = df["breed"].astype(str).str.strip()
