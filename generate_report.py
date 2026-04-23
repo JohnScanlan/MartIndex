@@ -87,7 +87,7 @@ def parse_eur(s):
     return pd.to_numeric(str(s).replace("€", "").replace(",", "").strip(),
                          errors="coerce")
 
-def eur(val, decimals=0):
+def eur(val, decimals=2):
     if val is None or (isinstance(val, float) and np.isnan(val)):
         return "N/A"
     fmt = f",.{decimals}f"
@@ -326,11 +326,15 @@ def chart_factory_trend(fp: pd.DataFrame) -> Path:
     # 12-week avg line
     avg12 = vals.mean()
     ax.axhline(avg12, color=navy_hex, linewidth=1, linestyle="--",
-               label=f"12-wk avg: EUR {avg12:.3f}/kg")
+               label=f"12-wk avg: EUR {avg12:.2f}/kg")
     ax.set_xticks(range(len(weeks)))
     ax.set_xticklabels(weeks, rotation=30, ha="right", fontsize=8)
     ax.set_ylabel("EUR/kg")
     ax.set_title("Factory Reference Steer - 12-Week Trend", fontweight="bold")
+    # Set Y-axis limits to 5 cents below min and 5 cents above max
+    y_min = vals.min() - 0.05
+    y_max = vals.max() + 0.05
+    ax.set_ylim(y_min, y_max)
     ax.legend(fontsize=8)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -359,11 +363,15 @@ def chart_mart_trend(df_valid: pd.DataFrame) -> Path:
     ax.plot(range(len(vals)), vals, marker="o", color=navy_hex, linewidth=2.5)
     ax.fill_between(range(len(vals)), vals, alpha=0.12, color=navy_hex)
     ax.axhline(avg12, color=f"#{GOLD[0]:02x}{GOLD[1]:02x}{GOLD[2]:02x}",
-               linewidth=1, linestyle="--", label=f"12-wk avg: EUR {avg12:.3f}/kg")
+               linewidth=1, linestyle="--", label=f"12-wk avg: EUR {avg12:.2f}/kg")
     ax.set_xticks(range(len(weeks)))
     ax.set_xticklabels(weeks, rotation=30, ha="right", fontsize=8)
     ax.set_ylabel("Median EUR/kg")
     ax.set_title("Mart National Median EUR/kg - 12-Week Trend", fontweight="bold")
+    # Set Y-axis limits to 5 cents below min and 5 cents above max
+    y_min = vals.min() - 0.05
+    y_max = vals.max() + 0.05
+    ax.set_ylim(y_min, y_max)
     ax.legend(fontsize=8)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
@@ -395,9 +403,9 @@ def page1_market_overview(report: Report, df_valid: pd.DataFrame, fp: pd.DataFra
                 prev_f = weekly_f.iloc[-2]["price_euro_per_kg"]
                 wow_f  = (latest_f - prev_f) / prev_f * 100
             factory_kpis = (
-                f"EUR {latest_f:.3f}/kg",
+                f"EUR {latest_f:.2f}/kg",
                 pct_arrow(wow_f) if not np.isnan(wow_f) else "N/A",
-                f"EUR {factory_avg12:.3f}/kg",
+                f"EUR {factory_avg12:.2f}/kg",
             )
 
     # ── Mart: latest & prev week, 12-wk avg ──────────────────────────────────
@@ -417,9 +425,9 @@ def page1_market_overview(report: Report, df_valid: pd.DataFrame, fp: pd.DataFra
             prev_m = weekly_m.iloc[-2]["ppkg"]
             wow_m  = (latest_m - prev_m) / prev_m * 100
         mart_kpis = (
-            f"EUR {latest_m:.3f}/kg",
+            f"EUR {latest_m:.2f}/kg",
             pct_arrow(wow_m) if not np.isnan(wow_m) else "N/A",
-            f"EUR {avg12_m:.3f}/kg",
+            f"EUR {avg12_m:.2f}/kg",
         )
 
     # ── KPI boxes ─────────────────────────────────────────────────────────────
@@ -546,9 +554,9 @@ def page2_price_tables(report: Report, df_valid: pd.DataFrame, fp: pd.DataFrame)
         report.set_fill_color(245, 247, 255) if fill else report.set_fill_color(255, 255, 255)
         wow_str = pct_arrow(row["wow"]) if "wow" in row and not np.isnan(row["wow"]) else "-"
         report.cell(col_w[0], 6, str(row["category"]), fill=fill)
-        report.cell(col_w[1], 6, f"{row['avg']:.3f}", fill=fill, align="C")
-        report.cell(col_w[2], 6, f"{row['lo']:.3f}", fill=fill, align="C")
-        report.cell(col_w[3], 6, f"{row['hi']:.3f}", fill=fill, align="C")
+        report.cell(col_w[1], 6, f"{row['avg']:.2f}", fill=fill, align="C")
+        report.cell(col_w[2], 6, f"{row['lo']:.2f}", fill=fill, align="C")
+        report.cell(col_w[3], 6, f"{row['hi']:.2f}", fill=fill, align="C")
         report.cell(col_w[4], 6, str(int(row["factories"])), fill=fill, align="C")
         report.cell(col_w[5], 6, wow_str, fill=fill, align="C", new_x="LMARGIN", new_y="NEXT")
     report.ln(4)
@@ -563,38 +571,6 @@ def page1_national_summary(report: Report, df_today: pd.DataFrame, df_valid: pd.
                       f"Total lots in dataset: {len(df_valid):,}",
                 new_x="LMARGIN", new_y="NEXT")
     report.ln(2)
-
-    # ── KPI row ───────────────────────────────────────────────────────────────
-    n_lots      = len(df_today)
-    n_marts     = df_today["mart"].nunique()
-    avg_price   = df_today["price_num"].mean()
-    med_ppkg    = df_today["ppkg"].median()
-    avg_wt      = df_today["weight_num"].mean()
-    total_value = df_today["price_num"].sum()
-
-    today_dt = df_valid["scraped_date"].max().date()
-    this_week = df_valid[df_valid["scraped_date"].dt.date > today_dt - timedelta(days=7)]
-    last_week = df_valid[(df_valid["scraped_date"].dt.date > today_dt - timedelta(days=14)) &
-                         (df_valid["scraped_date"].dt.date <= today_dt - timedelta(days=7))]
-    wow_change = np.nan
-    if not last_week.empty and not this_week.empty:
-        med_this = this_week["ppkg"].median()
-        med_last = last_week["ppkg"].median()
-        wow_change = (med_this - med_last) / med_last * 100
-
-    wow_str = pct_arrow(wow_change) if not np.isnan(wow_change) else "N/A"
-    wow_sub = "vs prev 7 days" if not np.isnan(wow_change) else ""
-
-    report.section_title("Today's National Market Summary")
-    report.kpi_row([
-        ("Lots Sold Today",    str(n_lots),                ""),
-        ("Marts Active",       str(n_marts),               ""),
-        ("Avg Price",          eur(avg_price),              ""),
-        ("Median EUR/kg",      eur(med_ppkg, 2),            ""),
-        ("Avg Weight",         f"{avg_wt:.0f} kg" if not np.isnan(avg_wt) else "N/A", ""),
-        ("Total Value Traded", eur(total_value),            ""),
-        ("WoW EUR/kg Change",  wow_str,                    wow_sub),
-    ])
 
     report.section_title("Volume & Price by Sex (today)")
     sex_map = {"M": "Male (Steer/Bull)", "F": "Female (Heifer)", "B": "Bull"}
@@ -980,10 +956,7 @@ def main():
     page1_market_overview(report, df_valid, fp)
     page2_price_tables(report, df_valid, fp)
     page1_national_summary(report, df_today, df_valid)
-    page2_breed_weight_table(report, df_valid, "M", "Males")
-    page2_breed_weight_table(report, df_valid, "F", "Females")
     page4_regional_and_intelligence(report, df_valid)
-    page5_ml_metrics(report, meta, df_valid)
 
     report.output(str(REPORT_PATH))
     print(f"  Report saved → {REPORT_PATH.name}")
