@@ -26,6 +26,8 @@ from email.mime.text import MIMEText
 from email import encoders
 from datetime import date, timedelta
 
+FACTORY_CSV = Path(__file__).parent / "factory_prices_clean.csv"
+
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -281,7 +283,279 @@ class Report(FPDF):
 
 # ── Page builders ─────────────────────────────────────────────────────────────
 
+def load_factory_data():
+    """Load and prep factory prices clean CSV."""
+    if not FACTORY_CSV.exists():
+        return pd.DataFrame()
+    fp = pd.read_csv(FACTORY_CSV, low_memory=False)
+    fp["report_date"] = pd.to_datetime(fp["report_date"], errors="coerce")
+    fp["price_euro_per_kg"] = pd.to_numeric(fp["price_euro_per_kg"], errors="coerce")
+    fp = fp[fp["source"] == "BeefPriceWatch"].copy()
+    return fp
+
+
+def _weekly_factory_steer(fp: pd.DataFrame) -> pd.DataFrame:
+    """Return weekly avg price for reference R3/R= steer (headline) over last 12 weeks."""
+    ref = fp[
+        fp["is_headline"] &
+        fp["category"].str.lower().str.contains("steer") &
+        fp["factory"].str.lower().ne("national")
+    ].copy()
+    ref["week"] = ref["report_date"].dt.to_period("W")
+    weekly = (ref.groupby("week")["price_euro_per_kg"]
+              .mean()
+              .reset_index()
+              .sort_values("week")
+              .tail(12))
+    return weekly
+
+
+def chart_factory_trend(fp: pd.DataFrame) -> Path:
+    """12-week factory reference steer price trend."""
+    weekly = _weekly_factory_steer(fp)
+    if weekly.empty:
+        return None
+    weeks = [str(w)[-5:] for w in weekly["week"]]
+    vals  = weekly["price_euro_per_kg"].values
+
+    fig, ax = plt.subplots(figsize=(9, 3.2))
+    gold_hex = f"#{GOLD[0]:02x}{GOLD[1]:02x}{GOLD[2]:02x}"
+    navy_hex = f"#{NAVY[0]:02x}{NAVY[1]:02x}{NAVY[2]:02x}"
+    ax.plot(range(len(vals)), vals, marker="o", color=gold_hex, linewidth=2.5)
+    ax.fill_between(range(len(vals)), vals, alpha=0.15, color=gold_hex)
+    # 12-week avg line
+    avg12 = vals.mean()
+    ax.axhline(avg12, color=navy_hex, linewidth=1, linestyle="--",
+               label=f"12-wk avg: EUR {avg12:.3f}/kg")
+    ax.set_xticks(range(len(weeks)))
+    ax.set_xticklabels(weeks, rotation=30, ha="right", fontsize=8)
+    ax.set_ylabel("EUR/kg")
+    ax.set_title("Factory Reference Steer - 12-Week Trend", fontweight="bold")
+    ax.legend(fontsize=8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    return save_tmp(fig_to_png(fig), "_chart_factory_trend.png")
+
+
+def chart_mart_trend(df_valid: pd.DataFrame) -> Path:
+    """12-week mart median EUR/kg trend."""
+    df_valid = df_valid.copy()
+    df_valid["week"] = df_valid["scraped_date"].dt.to_period("W")
+    weekly = (df_valid.groupby("week")["ppkg"]
+              .median()
+              .reset_index()
+              .sort_values("week")
+              .tail(12))
+    if weekly.empty:
+        return None
+    weeks = [str(w)[-5:] for w in weekly["week"]]
+    vals  = weekly["ppkg"].values
+    avg12 = vals.mean()
+
+    navy_hex = f"#{NAVY[0]:02x}{NAVY[1]:02x}{NAVY[2]:02x}"
+    fig, ax = plt.subplots(figsize=(9, 3.2))
+    ax.plot(range(len(vals)), vals, marker="o", color=navy_hex, linewidth=2.5)
+    ax.fill_between(range(len(vals)), vals, alpha=0.12, color=navy_hex)
+    ax.axhline(avg12, color=f"#{GOLD[0]:02x}{GOLD[1]:02x}{GOLD[2]:02x}",
+               linewidth=1, linestyle="--", label=f"12-wk avg: EUR {avg12:.3f}/kg")
+    ax.set_xticks(range(len(weeks)))
+    ax.set_xticklabels(weeks, rotation=30, ha="right", fontsize=8)
+    ax.set_ylabel("Median EUR/kg")
+    ax.set_title("Mart National Median EUR/kg - 12-Week Trend", fontweight="bold")
+    ax.legend(fontsize=8)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(axis="y", alpha=0.3)
+    fig.tight_layout()
+    return save_tmp(fig_to_png(fig), "_chart_mart_trend.png")
+
+
+def page1_market_overview(report: Report, df_valid: pd.DataFrame, fp: pd.DataFrame):
+    """Page 1 - Factory reference price + mart price, 12-week trends, % changes."""
+    report.add_page()
+    report.set_font("Helvetica", "", 8)
+    report.set_text_color(100, 100, 100)
+    report.cell(0, 5, f"Report date: {date.today().isoformat()}    "
+                      f"Total mart lots in dataset: {len(df_valid):,}",
+                new_x="LMARGIN", new_y="NEXT")
+    report.ln(2)
+
+    # ── Factory: latest & prev week, 12-wk avg ────────────────────────────────
+    factory_kpis = ("N/A", "N/A", "N/A")
+    factory_avg12 = np.nan
+    if not fp.empty:
+        weekly_f = _weekly_factory_steer(fp)
+        if len(weekly_f) >= 1:
+            latest_f  = weekly_f.iloc[-1]["price_euro_per_kg"]
+            factory_avg12 = weekly_f["price_euro_per_kg"].mean()
+            wow_f = np.nan
+            if len(weekly_f) >= 2:
+                prev_f = weekly_f.iloc[-2]["price_euro_per_kg"]
+                wow_f  = (latest_f - prev_f) / prev_f * 100
+            factory_kpis = (
+                f"EUR {latest_f:.3f}/kg",
+                pct_arrow(wow_f) if not np.isnan(wow_f) else "N/A",
+                f"EUR {factory_avg12:.3f}/kg",
+            )
+
+    # ── Mart: latest & prev week, 12-wk avg ──────────────────────────────────
+    df_valid = df_valid.copy()
+    df_valid["week"] = df_valid["scraped_date"].dt.to_period("W")
+    weekly_m = (df_valid.groupby("week")["ppkg"]
+                .median()
+                .reset_index()
+                .sort_values("week")
+                .tail(12))
+    mart_kpis = ("N/A", "N/A", "N/A")
+    if len(weekly_m) >= 1:
+        latest_m  = weekly_m.iloc[-1]["ppkg"]
+        avg12_m   = weekly_m["ppkg"].mean()
+        wow_m     = np.nan
+        if len(weekly_m) >= 2:
+            prev_m = weekly_m.iloc[-2]["ppkg"]
+            wow_m  = (latest_m - prev_m) / prev_m * 100
+        mart_kpis = (
+            f"EUR {latest_m:.3f}/kg",
+            pct_arrow(wow_m) if not np.isnan(wow_m) else "N/A",
+            f"EUR {avg12_m:.3f}/kg",
+        )
+
+    # ── KPI boxes ─────────────────────────────────────────────────────────────
+    report.section_title("Factory Prices - Reference Steer (R3 Headline, National Avg)")
+    report.kpi_row([
+        ("Latest Week",         factory_kpis[0], ""),
+        ("Change vs Prev Week", factory_kpis[1], ""),
+        ("12-Week Average",     factory_kpis[2], ""),
+    ])
+
+    report.section_title("Mart Prices - National Median EUR/kg")
+    report.kpi_row([
+        ("Latest Week",         mart_kpis[0], ""),
+        ("Change vs Prev Week", mart_kpis[1], ""),
+        ("12-Week Average",     mart_kpis[2], ""),
+    ])
+
+    # ── Factory 12-week trend chart ───────────────────────────────────────────
+    report.section_title("Factory Reference Steer - 12-Week Price Trend")
+    try:
+        p = chart_factory_trend(fp)
+        if p:
+            report.add_image_full(p, h=52)
+    except Exception as e:
+        report.cell(0, 6, f"Chart error: {e}", new_x="LMARGIN", new_y="NEXT")
+
+    # ── Mart 12-week trend chart ──────────────────────────────────────────────
+    report.section_title("Mart National Median - 12-Week Price Trend")
+    try:
+        p = chart_mart_trend(df_valid)
+        if p:
+            report.add_image_full(p, h=52)
+    except Exception as e:
+        report.cell(0, 6, f"Chart error: {e}", new_x="LMARGIN", new_y="NEXT")
+
+
+def page2_price_tables(report: Report, df_valid: pd.DataFrame, fp: pd.DataFrame):
+    """Page 2 - Top 5 breed × weight class tables for mart + factory category table."""
+    report.add_page()
+
+    # ── Mart: top 5 breeds by volume, last 30 days ───────────────────────────
+    cutoff = df_valid["scraped_date"].max() - timedelta(days=30)
+    df_30  = df_valid[df_valid["scraped_date"] >= cutoff].copy()
+    top5   = df_30["breed"].value_counts().head(5).index.tolist()
+
+    df_30["weight_bracket"] = pd.cut(df_30["weight_num"],
+                                     bins=WEIGHT_BINS, labels=WEIGHT_LABELS, right=False)
+
+    for sex, sex_label in [("M", "Males"), ("F", "Females")]:
+        report.section_title(f"Mart - Top 5 Breeds × Weight Class ({sex_label}, last 30 days, avg EUR/kg)")
+        df_s = df_30[(df_30["sex"] == sex) & (df_30["breed"].isin(top5))].copy()
+
+        pivot = (df_s.groupby(["breed", "weight_bracket"])["ppkg"]
+                 .agg(["mean", "count"])
+                 .reset_index())
+
+        breed_w  = 30
+        bracket_w = (report.epw - breed_w) / len(WEIGHT_LABELS)
+
+        report.set_font("Helvetica", "B", 8)
+        report.set_fill_color(*NAVY)
+        report.set_text_color(255, 255, 255)
+        report.cell(breed_w, 7, "Breed", fill=True, align="C")
+        for lbl in WEIGHT_LABELS:
+            report.cell(bracket_w, 7, lbl, fill=True, align="C")
+        report.ln()
+        report.set_text_color(0, 0, 0)
+
+        for i, breed in enumerate(top5):
+            fill = i % 2 == 0
+            report.set_fill_color(245, 247, 255) if fill else report.set_fill_color(255, 255, 255)
+            report.set_font("Helvetica", "B", 8)
+            report.cell(breed_w, 6, breed, fill=fill)
+            report.set_font("Helvetica", "", 8)
+            for bracket in WEIGHT_LABELS:
+                row = pivot[(pivot["breed"] == breed) & (pivot["weight_bracket"] == bracket)]
+                val = f"{row.iloc[0]['mean']:.2f}" if not row.empty and row.iloc[0]["count"] >= 3 else "-"
+                report.cell(bracket_w, 6, val, fill=fill, align="C")
+            report.ln()
+        report.ln(4)
+
+    # ── Factory: latest week avg price by category ────────────────────────────
+    if fp.empty:
+        return
+    report.section_title("Factory - Latest Week Avg Price by Category (EUR/kg, all factories)")
+    latest_w = fp["report_date"].max()
+    fp_latest = fp[
+        fp["is_headline"] &
+        (fp["report_date"] == latest_w) &
+        fp["factory"].str.lower().ne("national")
+    ].copy()
+
+    cat_summary = (fp_latest.groupby("category")["price_euro_per_kg"]
+                   .agg(avg="mean", lo="min", hi="max", factories="count")
+                   .reset_index()
+                   .sort_values("avg", ascending=False))
+
+    # Compare vs previous week
+    dates_sorted = sorted(fp["report_date"].dropna().unique(), reverse=True)
+    prev_w = dates_sorted[1] if len(dates_sorted) >= 2 else None
+    if prev_w is not None:
+        fp_prev = fp[fp["is_headline"] & (fp["report_date"] == prev_w) &
+                     fp["factory"].str.lower().ne("national")]
+        prev_avg = fp_prev.groupby("category")["price_euro_per_kg"].mean().rename("prev_avg")
+        cat_summary = cat_summary.set_index("category").join(prev_avg).reset_index()
+        cat_summary["wow"] = ((cat_summary["avg"] - cat_summary["prev_avg"])
+                              / cat_summary["prev_avg"] * 100)
+    else:
+        cat_summary["wow"] = np.nan
+
+    col_w = [45, 30, 25, 25, 30, 35]
+    headers = ["Category", "Avg EUR/kg", "Min", "Max", "Factories", "vs Prev Week"]
+    report.set_font("Helvetica", "B", 8)
+    report.set_fill_color(*NAVY)
+    report.set_text_color(255, 255, 255)
+    for h, w in zip(headers, col_w):
+        report.cell(w, 7, h, fill=True, align="C")
+    report.ln()
+    report.set_text_color(0, 0, 0)
+    report.set_font("Helvetica", "", 8)
+
+    for i, row in cat_summary.iterrows():
+        fill = i % 2 == 0
+        report.set_fill_color(245, 247, 255) if fill else report.set_fill_color(255, 255, 255)
+        wow_str = pct_arrow(row["wow"]) if "wow" in row and not np.isnan(row["wow"]) else "-"
+        report.cell(col_w[0], 6, str(row["category"]), fill=fill)
+        report.cell(col_w[1], 6, f"{row['avg']:.3f}", fill=fill, align="C")
+        report.cell(col_w[2], 6, f"{row['lo']:.3f}", fill=fill, align="C")
+        report.cell(col_w[3], 6, f"{row['hi']:.3f}", fill=fill, align="C")
+        report.cell(col_w[4], 6, str(int(row["factories"])), fill=fill, align="C")
+        report.cell(col_w[5], 6, wow_str, fill=fill, align="C", new_x="LMARGIN", new_y="NEXT")
+    report.ln(4)
+
+
 def page1_national_summary(report: Report, df_today: pd.DataFrame, df_valid: pd.DataFrame):
+    """Legacy summary page - kept as page 3."""
     report.add_page()
     report.set_font("Helvetica", "", 8)
     report.set_text_color(100, 100, 100)
@@ -298,7 +572,6 @@ def page1_national_summary(report: Report, df_today: pd.DataFrame, df_valid: pd.
     avg_wt      = df_today["weight_num"].mean()
     total_value = df_today["price_num"].sum()
 
-    # Week-on-week change
     today_dt = df_valid["scraped_date"].max().date()
     this_week = df_valid[df_valid["scraped_date"].dt.date > today_dt - timedelta(days=7)]
     last_week = df_valid[(df_valid["scraped_date"].dt.date > today_dt - timedelta(days=14)) &
@@ -323,7 +596,6 @@ def page1_national_summary(report: Report, df_today: pd.DataFrame, df_valid: pd.
         ("WoW EUR/kg Change",  wow_str,                    wow_sub),
     ])
 
-    # ── Sex split table ───────────────────────────────────────────────────────
     report.section_title("Volume & Price by Sex (today)")
     sex_map = {"M": "Male (Steer/Bull)", "F": "Female (Heifer)", "B": "Bull"}
     df_today = df_today.copy()
@@ -345,7 +617,6 @@ def page1_national_summary(report: Report, df_today: pd.DataFrame, df_valid: pd.
         report.cell(w, 6, h, border=0, fill=True, align="C")
     report.ln()
     report.set_text_color(0, 0, 0)
-
     report.set_font("Helvetica", "", 8)
     for i, (sex, row) in enumerate(sex_grp.iterrows()):
         fill = i % 2 == 0
@@ -359,7 +630,6 @@ def page1_national_summary(report: Report, df_today: pd.DataFrame, df_valid: pd.
                     fill=fill, align="C", new_x="LMARGIN", new_y="NEXT")
     report.ln(4)
 
-    # ── Mart table ────────────────────────────────────────────────────────────
     report.section_title("Lots by Mart (today)")
     mart_summary = (df_today.groupby("mart")
                     .agg(lots=("lot", "count"),
@@ -390,7 +660,6 @@ def page1_national_summary(report: Report, df_today: pd.DataFrame, df_valid: pd.
                     fill=fill, align="C", new_x="LMARGIN", new_y="NEXT")
     report.ln(4)
 
-    # ── Weekly trend chart ────────────────────────────────────────────────────
     try:
         p = chart_weekly_trend(df_valid)
         report.add_image_full(p, h=55)
@@ -706,6 +975,10 @@ def main():
     report = Report(orientation="P", unit="mm", format="A4")
     report.set_auto_page_break(auto=True, margin=12)
 
+    fp = load_factory_data()
+
+    page1_market_overview(report, df_valid, fp)
+    page2_price_tables(report, df_valid, fp)
     page1_national_summary(report, df_today, df_valid)
     page2_breed_weight_table(report, df_valid, "M", "Males")
     page2_breed_weight_table(report, df_valid, "F", "Females")
