@@ -16,6 +16,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
+from data_utils import load_data_safe
+
 warnings.filterwarnings("ignore")
 
 BASE = Path(__file__).parent
@@ -204,8 +206,8 @@ def _layout(**kw):
 
 @st.cache_data(ttl=3600)
 def load_data():
-    # MartBids
-    mb = pd.read_csv(BASE / "sold_lots.csv")
+    # MartBids (use parquet for faster loading)
+    mb = load_data_safe(BASE / "sold_lots.csv", BASE / "sold_lots.parquet")
     mb["source"]    = "MartBids"
     mb["price_num"] = mb["price"].apply(parse_eur)
     mb["weight"]    = pd.to_numeric(mb["weight"], errors="coerce")
@@ -249,7 +251,20 @@ def load_data():
     return df
 
 
-# ── Section: KPIs ──────────────────────────────────────────────────────────────
+@st.cache_data(ttl=3600)
+def load_factory_prices():
+    """Load factory reference prices (R3 headline steer)."""
+    try:
+        fp = load_data_safe(BASE / "factory_prices_clean.csv",
+                           BASE / "factory_prices_clean.parquet")
+        fp = fp[fp["is_headline"] == True].copy()  # Only headline prices
+        fp["report_date"] = pd.to_datetime(fp["report_date"], errors="coerce")
+        return fp
+    except:
+        return pd.DataFrame()
+
+
+
 
 def section_kpis(df):
     lots      = len(df)
@@ -696,7 +711,74 @@ def section_sex_age(df):
         st.plotly_chart(fig2, use_container_width=True)
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# ── Section: Factory Reference Prices ─────────────────────────────────────────
+
+def section_factory_reference(fp):
+    """Factory reference pricing for collateral comparison."""
+    st.subheader("Factory Reference Prices (R3 Headline Steer)")
+    st.caption("National benchmark factory prices. Use to validate mar pricing.")
+
+    if fp.empty:
+        st.info("Factory price data not available.")
+        return
+
+    # Latest week prices by factory
+    latest_week = fp["report_date"].max()
+    fp_week = fp[fp["report_date"] == latest_week].copy()
+    fp_week["price_euro_per_kg"] = pd.to_numeric(fp_week["price_euro_per_kg"], errors="coerce")
+
+    # Factory average
+    factories = (fp_week.groupby("factory")["price_euro_per_kg"]
+                 .mean().reset_index()
+                 .sort_values("price_euro_per_kg", ascending=False))
+
+    if factories.empty:
+        st.info("No factory prices for the latest week.")
+        return
+
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        # Factory comparison bar
+        nat_avg = factories["price_euro_per_kg"].mean()
+        fig = go.Figure(go.Bar(
+            x=factories["factory"],
+            y=factories["price_euro_per_kg"].round(2),
+            marker_color=[GOLD if v >= nat_avg else NAVY for v in factories["price_euro_per_kg"]],
+            text=[f"€{v:.2f}" for v in factories["price_euro_per_kg"]],
+            textposition="outside",
+        ))
+        fig.add_hline(y=nat_avg, line_dash="dash", line_color=RED,
+                      annotation_text=f"Avg €{nat_avg:.2f}")
+        fig.update_layout(title=f"Factory €/kg — Week of {latest_week.strftime('%d %b')}",
+                         yaxis_title="€/kg", height=280, **_layout())
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.metric("National Factory Avg", f"€{nat_avg:.2f}")
+        st.metric("High", f"€{factories['price_euro_per_kg'].max():.2f}")
+    with col3:
+        st.metric("Low", f"€{factories['price_euro_per_kg'].min():.2f}")
+        st.metric("Spread", f"€{factories['price_euro_per_kg'].max() - factories['price_euro_per_kg'].min():.2f}")
+
+    # 12-week trend
+    fp_trend = (fp[fp["factory"] == "National"]
+                .sort_values("report_date")
+                .tail(12).copy())
+    if not fp_trend.empty:
+        fp_trend["price_euro_per_kg"] = pd.to_numeric(fp_trend["price_euro_per_kg"], errors="coerce")
+        fig2 = go.Figure(go.Scatter(
+            x=fp_trend["report_date"],
+            y=fp_trend["price_euro_per_kg"].round(2),
+            mode="lines+markers", name="National Avg",
+            line=dict(color=GOLD, width=3),
+            marker=dict(size=8),
+        ))
+        fig2.update_layout(title="National Factory Price — 12-Week Trend",
+                          xaxis_title="Week", yaxis_title="€/kg",
+                          height=280, **_layout())
+        st.plotly_chart(fig2, use_container_width=True)
+
+
 
 def main():
     # ── Sidebar ───────────────────────────────────────────────────────────────
@@ -736,7 +818,8 @@ def main():
         <div style="font-size:0.75rem;color:#6B7A99;line-height:1.6">
             <b style="color:{GOLD}">Data sources</b><br>
             MartBids.ie — {df_raw[df_raw['source']=='MartBids'].shape[0]:,} lots<br>
-            Livestock-Live.com — {df_raw[df_raw['source']=='Livestock-Live'].shape[0]:,} lots<br><br>
+            Livestock-Live.com — {df_raw[df_raw['source']=='Livestock-Live'].shape[0]:,} lots<br>
+            Factory (DAFM/BPW) — daily prices<br><br>
             <b style="color:{GOLD}">Updated</b><br>
             {df_raw['sale_date'].max().strftime('%d %b %Y')}
         </div>
@@ -775,9 +858,10 @@ def main():
     st.divider()
 
     # ── Tabs ──────────────────────────────────────────────────────────────────
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    fp = load_factory_prices()
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "Cohort Matrix", "Regional Analysis", "Price Trends",
-        "Mart Comparison", "Collateral Reference"
+        "Mart Comparison", "Collateral Reference", "Factory Reference"
     ])
 
     with tab1:
@@ -796,6 +880,9 @@ def main():
 
     with tab5:
         section_collateral_ref(df)
+
+    with tab6:
+        section_factory_reference(fp)
 
 
 if __name__ == "__main__":
