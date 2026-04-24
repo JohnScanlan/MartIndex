@@ -27,6 +27,8 @@ from pathlib import Path
 
 import requests
 
+from data_utils import safe_append_csv
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s %(message)s",
@@ -72,16 +74,8 @@ def _load_existing() -> set:
 
 
 def _append_rows(rows: list[dict], seen: set) -> int:
-    new = [r for r in rows if tuple(r.get(k, "") for k in DEDUP_KEY) not in seen]
-    if not new:
-        return 0
-    write_header = not OUTPUT_CSV.exists()
-    with open(OUTPUT_CSV, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, extrasaction="ignore")
-        if write_header:
-            writer.writeheader()
-        writer.writerows(new)
-    return len(new)
+    """Safely append new rows using atomic write."""
+    return safe_append_csv(OUTPUT_CSV, rows, CSV_FIELDS, dedup_key=DEDUP_KEY)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -253,8 +247,21 @@ def _bpw_national_for_range(start: str, end: str) -> list[dict]:
 
 
 def scrape_bpw() -> list[dict]:
-    """Scrape BeefPriceWatch via its REST API for the last 12 weeks."""
-    dates = _bpw_get_dates(weeks=12)
+    """Scrape BeefPriceWatch via its REST API.
+
+    Smart week fetching:
+    - If factory_prices.csv exists, fetch only last 3 weeks (safety margin for edits)
+    - If new file, fetch 12 weeks (bootstrap)
+    """
+    # Determine weeks to fetch
+    if OUTPUT_CSV.exists():
+        weeks_to_fetch = 3  # Just recent weeks — API rarely changes old data
+        log.info("BPW: existing data found, fetching recent %d weeks", weeks_to_fetch)
+    else:
+        weeks_to_fetch = 12  # Bootstrap: get full history
+        log.info("BPW: no existing data, bootstrapping with %d weeks", weeks_to_fetch)
+
+    dates = _bpw_get_dates(weeks=weeks_to_fetch)
     if not dates:
         log.warning("BPW: no dates returned")
         return []

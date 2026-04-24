@@ -11,6 +11,10 @@ scraper.log
 # Generated reports
 daily_report.pdf
 
+# Parquet files (backed up to Google Drive)
+*.parquet
+*.parquet.bak
+
 # Python cache
 __pycache__/
 *.pyc
