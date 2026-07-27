@@ -13,6 +13,7 @@ import requests
 import pandas as pd
 from pathlib import Path
 from mart_coords import MART_COORDS
+from data_utils import safe_append_csv
 
 DIR           = Path(__file__).parent
 LOTS_CSV      = DIR / "sold_lots.csv"
@@ -110,12 +111,9 @@ def main():
         time.sleep(0.3)   # be polite to the free API
 
     if new_rows:
-        new_df = pd.DataFrame(new_rows, columns=WEATHER_COLS)
-        cache = pd.concat([cache, new_df], ignore_index=True)
-        cache = cache.drop_duplicates(subset=["mart", "date"])
-        cache.to_csv(WEATHER_CSV, index=False)
-        print(f"Weather cache updated → {len(new_rows)} new rows, "
-              f"{len(cache)} total rows.")
+        added = safe_append_csv(WEATHER_CSV, new_rows, WEATHER_COLS, dedup_key=("mart", "date"))
+        total = len(pd.read_csv(WEATHER_CSV))
+        print(f"Weather cache updated → {added} new rows, {total} total rows.")
     else:
         print("No new weather data retrieved.")
 

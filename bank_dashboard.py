@@ -234,7 +234,7 @@ def load_data():
 
     df["price_per_kg"] = df["price_num"] / df["weight"].replace(0, np.nan)
     df = df[(df["price_per_kg"] >= 0.5) & (df["price_per_kg"] <= 20)].copy()
-    df = df[df["weight"] >= 50].copy()
+    df = df[(df["weight"] >= 50) & (df["weight"] <= 1_250)].copy()
 
     df["sex_clean"]    = df["sex"].map({"M": "Male", "F": "Female", "B": "Bull"}).fillna("Unknown")
     df["breed_group"]  = df["breed"].map(BREED_GROUP_MAP).fillna("Other")

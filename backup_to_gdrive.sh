@@ -3,10 +3,11 @@
 # Run daily via cron (e.g., 9pm)
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG="$DIR/scraper.log"
-REMOTE="drive:MartBids"
+LOG="$DIR/backup.log"
+TODAY="$(date '+%Y-%m-%d')"
+REMOTE="drive:MartBids/backups/$TODAY"
 
-echo "-------- BACKUP $(date '+%Y-%m-%d %H:%M:%S') --------" >> "$LOG"
+echo "-------- BACKUP $(date '+%Y-%m-%d %H:%M:%S') → $REMOTE --------" >> "$LOG"
 
 # Convert CSVs to parquet for faster loading
 echo "Converting CSVs to parquet..." >> "$LOG"
@@ -22,17 +23,27 @@ for csv in ["sold_lots.csv", "factory_prices_clean.csv"]:
         csv_to_parquet(csv_path, parquet_path)
 PYTHON_EOF
 
-# Backup to Google Drive (atomic files only)
-/opt/homebrew/bin/rclone copy "$DIR/sold_lots.csv"              "$REMOTE" --log-level INFO 2>> "$LOG"
-/opt/homebrew/bin/rclone copy "$DIR/sold_lots.parquet"          "$REMOTE" --log-level INFO 2>> "$LOG"
-/opt/homebrew/bin/rclone copy "$DIR/factory_prices_clean.csv"   "$REMOTE" --log-level INFO 2>> "$LOG"
-/opt/homebrew/bin/rclone copy "$DIR/factory_prices_clean.parquet" "$REMOTE" --log-level INFO 2>> "$LOG"
-/opt/homebrew/bin/rclone copy "$DIR/cattle_model.pkl"           "$REMOTE" --log-level INFO 2>> "$LOG"
-/opt/homebrew/bin/rclone copy "$DIR/model_metadata.json"        "$REMOTE" --log-level INFO 2>> "$LOG"
-/opt/homebrew/bin/rclone copy "$DIR/model_test_predictions.csv" "$REMOTE" --log-level INFO 2>> "$LOG"
-/opt/homebrew/bin/rclone copy "$DIR/weather_cache.csv"          "$REMOTE" --log-level INFO 2>> "$LOG"
-/opt/homebrew/bin/rclone copy "$DIR/shap_values.pkl"            "$REMOTE" --log-level INFO 2>> "$LOG"
-/opt/homebrew/bin/rclone copy "$DIR/shap_background.pkl"        "$REMOTE" --log-level INFO 2>> "$LOG"
+# Backup to dated subfolder — never overwrites a previous day's backup
+FILES=(
+    sold_lots.csv
+    sold_lots.parquet
+    factory_prices.csv
+    factory_prices_clean.csv
+    factory_prices_clean.parquet
+    cattle_model.pkl
+    model_metadata.json
+    model_test_predictions.csv
+    weather_cache.csv
+    shap_values.pkl
+    shap_background.pkl
+)
+
+for f in "${FILES[@]}"; do
+    if [ -f "$DIR/$f" ]; then
+        /opt/homebrew/bin/rclone copy "$DIR/$f" "$REMOTE" --log-level INFO 2>> "$LOG"
+        echo "  backed up: $f" >> "$LOG"
+    fi
+done
 
 echo "Backup complete → $REMOTE" >> "$LOG"
 echo "" >> "$LOG"

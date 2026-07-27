@@ -382,8 +382,8 @@ def load_data():
     df = df[df["price_num"] > 0].dropna(subset=["price_num", "weight"]).copy()
 
     # ── Global hard filters ────────────────────────────────────────────────
-    df = df[df["weight"] > 0].copy()
-    df = df[df["price_num"] <= 10_000].copy()                  # remove outliers
+    df = df[(df["weight"] > 0) & (df["weight"] <= 1_250)].copy()        # realistic cattle weight
+    df = df[df["price_num"] <= 10_000].copy()                            # remove price outliers
     df = df[df["age_months"].isna() | (df["age_months"] <= 96)].copy()  # max 8 years
     df = df[df["sex_clean"] != "Unknown"].copy()                         # known sex only
 
@@ -555,7 +555,9 @@ def sidebar_filters(df):
 # TAB 1 — Market Overview
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def tab_overview(df):
+def tab_overview(df, fp: pd.DataFrame = None):
+    # ── Mart KPIs ─────────────────────────────────────────────────────────────
+    st.markdown("### 🐄 Live Mart Prices")
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("Total Lots",   f"{len(df):,}")
     k2.metric("Avg Price",    f"€{df['price_num'].mean():,.0f}")
@@ -563,23 +565,89 @@ def tab_overview(df):
     k4.metric("Avg €/kg",     f"€{df['price_per_kg_num'].mean():.2f}")
     k5.metric("Active Marts", str(df["mart"].nunique()))
 
+    # ── Factory KPIs ──────────────────────────────────────────────────────────
+    if fp is not None and not fp.empty:
+        st.markdown("### 🏭 Factory Prices")
+        bpw    = fp[fp["source"] == "BeefPriceWatch"].copy()
+        latest = bpw["report_date"].max()
+        prev   = bpw[bpw["report_date"] < latest]["report_date"].max()
+        ref_latest = bpw[bpw["is_headline"] & (bpw["category"] == "Steer") & (bpw["report_date"] == latest)]
+        ref_prev   = bpw[bpw["is_headline"] & (bpw["category"] == "Steer") & (bpw["report_date"] == prev)]
+        r3_steer   = ref_latest["price_euro_per_kg"].mean()
+        r3_delta   = r3_steer - ref_prev["price_euro_per_kg"].mean()
+        r3_heifer  = bpw[bpw["is_headline"] & (bpw["category"] == "Heifer") & (bpw["report_date"] == latest)]["price_euro_per_kg"].mean()
+        r3_cow     = bpw[bpw["is_headline"] & (bpw["category"] == "Cow")    & (bpw["report_date"] == latest)]["price_euro_per_kg"].mean()
+        top_fac    = ref_latest.loc[ref_latest["price_euro_per_kg"].idxmax(), "factory"] if not ref_latest.empty else "—"
+        top_price  = ref_latest["price_euro_per_kg"].max()
+
+        f1, f2, f3, f4 = st.columns(4)
+        f1.metric("R3 Steer (avg)",      f"€{r3_steer:.3f}/kg", delta=f"{r3_delta:+.3f} vs prev week")
+        f2.metric("R3 Heifer (avg)",     f"€{r3_heifer:.3f}/kg")
+        f3.metric("O4 Cow (avg)",        f"€{r3_cow:.3f}/kg")
+        f4.metric("Top paying factory",  top_fac, delta=f"€{top_price:.3f}/kg", delta_color="normal")
+        st.caption(f"BeefPriceWatch (DAFM) · week ending {latest.strftime('%d %b %Y')}")
+
     st.divider()
+
+    # ── Mart avg €/kg vs Factory R3 Steer trend ──────────────────────────────
+    if fp is not None and not fp.empty:
+        bpw    = fp[fp["source"] == "BeefPriceWatch"].copy()
+        weekly_factory = (
+            bpw[bpw["is_headline"] & (bpw["category"] == "Steer")]
+            .groupby("report_date")["price_euro_per_kg"]
+            .mean()
+            .reset_index()
+            .rename(columns={"report_date": "date", "price_euro_per_kg": "r3_steer"})
+        )
+        daily_mart = (
+            df.groupby(df["sale_date"].dt.date)["price_per_kg_num"]
+            .mean()
+            .reset_index()
+            .rename(columns={"sale_date": "date", "price_per_kg_num": "mart_ppkg"})
+        )
+        daily_mart["date"] = pd.to_datetime(daily_mart["date"])
+        weekly_factory["date"] = pd.to_datetime(weekly_factory["date"])
+
+        fig_cmp = go.Figure()
+        fig_cmp.add_trace(go.Scatter(
+            x=daily_mart["date"], y=daily_mart["mart_ppkg"],
+            mode="lines+markers", name="Live Mart Avg €/kg",
+            line=dict(color=FB_BLUE, width=2),
+            hovertemplate="<b>%{x|%d %b}</b><br>Mart: €%{y:.2f}/kg<extra></extra>",
+        ))
+        fig_cmp.add_trace(go.Scatter(
+            x=weekly_factory["date"], y=weekly_factory["r3_steer"],
+            mode="lines+markers", name="R3 Steer Factory (avg)",
+            line=dict(color=FB_RED, width=2, dash="dot"),
+            marker=dict(size=7),
+            hovertemplate="<b>%{x|%d %b}</b><br>Factory R3: €%{y:.3f}/kg<extra></extra>",
+        ))
+        fig_cmp.update_layout(
+            title="Live Mart €/kg vs Factory R3 Steer Price",
+            yaxis_title="€/kg", height=320, hovermode="x unified",
+            legend=dict(orientation="h", y=1.08, font=dict(color=FB_DARK)),
+            **_chart_layout(),
+        )
+        fig_cmp.update_xaxes(gridcolor="#F0F2F5")
+        fig_cmp.update_yaxes(gridcolor="#F0F2F5")
+        _show_chart(fig_cmp)
+        st.divider()
 
     col_a, col_b = st.columns(2)
 
     with col_a:
-        mart_avg = (df.groupby("mart")["price_num"]
+        mart_avg = (df.groupby("mart")["price_per_kg_num"]
                       .agg(["mean", "count"])
-                      .rename(columns={"mean": "avg_price", "count": "lots"})
-                      .sort_values("avg_price", ascending=True)
+                      .rename(columns={"mean": "avg_ppkg", "count": "lots"})
+                      .sort_values("avg_ppkg", ascending=True)
                       .reset_index())
         fig = px.bar(
-            mart_avg, x="avg_price", y="mart", orientation="h",
-            text=mart_avg["avg_price"].map("€{:,.0f}".format),
-            hover_data={"lots": True, "avg_price": ":,.0f"},
-            color="avg_price", color_continuous_scale=[[0, "#E7F3FF"], [1, FB_BLUE]],
-            title="Average Sold Price by Mart",
-            labels={"avg_price": "Avg Price (€)", "mart": ""},
+            mart_avg, x="avg_ppkg", y="mart", orientation="h",
+            text=mart_avg["avg_ppkg"].map("€{:.2f}".format),
+            hover_data={"lots": True, "avg_ppkg": ":.2f"},
+            color="avg_ppkg", color_continuous_scale=[[0, "#E7F3FF"], [1, FB_BLUE]],
+            title="Average €/kg by Mart",
+            labels={"avg_ppkg": "Avg €/kg", "mart": ""},
         )
         fig.update_traces(textposition="outside")
         fig.update_layout(coloraxis_showscale=False, height=520,
@@ -824,11 +892,11 @@ def tab_tracker(df):
     st.divider()
 
     # ── Stock chart — €/kg ────────────────────────────────────────────────────
+    y_lo = daily["avg_ppkg"].min() - 0.05
+    y_hi = daily["avg_ppkg"].max() + 0.05
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=daily["date"], y=daily["avg_ppkg"],
-        fill="tozeroy",
-        fillcolor="rgba(24, 119, 242, 0.10)",
         line=dict(color=FB_BLUE, width=2),
         name="Avg €/kg",
         hovertemplate="<b>%{x|%d %b %Y}</b><br>Avg €/kg: €%{y:.2f}<extra></extra>",
@@ -841,7 +909,7 @@ def tab_tracker(df):
     ))
     fig.update_layout(
         title="Irish Cattle Market — Avg Price per KG",
-        yaxis_title="€ per kg",
+        yaxis=dict(title="€ per kg", range=[y_lo, y_hi]),
         height=400,
         hovermode="x unified",
         legend=dict(orientation="h", y=1.08, x=0, font=dict(color=FB_DARK)),
@@ -918,29 +986,6 @@ def tab_tracker(df):
     fig_bt.update_yaxes(gridcolor="#F0F2F5")
     _show_chart(fig_bt)
 
-    if "temp_max_c" in df2.columns and df2["temp_max_c"].notna().any():
-        st.subheader("Weather vs Price Correlation")
-        wx_ts = (df2.groupby(grp_col)
-                    .agg(avg_ppkg=("price_per_kg_num", "mean"),
-                         avg_temp=("temp_max_c", "mean"),
-                         avg_rain=("precipitation_mm", "mean"))
-                    .reset_index())
-        wx_ts.columns = ["date", "avg_ppkg", "avg_temp", "avg_rain"]
-        col_wx1, col_wx2 = st.columns(2)
-        with col_wx1:
-            fig_wx1 = px.scatter(wx_ts, x="avg_temp", y="avg_ppkg", trendline="ols",
-                                 title="Avg Temp vs Avg €/kg",
-                                 labels={"avg_temp": "Avg Max Temp (°C)", "avg_ppkg": "Avg €/kg"},
-                                 height=350, color_discrete_sequence=[FB_BLUE])
-            fig_wx1.update_layout(**_chart_layout())
-            _show_chart(fig_wx1)
-        with col_wx2:
-            fig_wx2 = px.scatter(wx_ts, x="avg_rain", y="avg_ppkg", trendline="ols",
-                                 title="Rainfall vs Avg €/kg",
-                                 labels={"avg_rain": "Precipitation (mm)", "avg_ppkg": "Avg €/kg"},
-                                 height=350, color_discrete_sequence=[FB_GREEN])
-            fig_wx2.update_layout(**_chart_layout())
-            _show_chart(fig_wx2)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1251,6 +1296,8 @@ def tab_calculator(df):
         colors = [FB_GREEN if r["selected"] else
                   ("#F7B928" if r["Mart"] == best_mart else FB_BLUE)
                   for _, r in mart_df.iterrows()]
+        m_lo = mart_df["Pred. €/kg"].min() - 0.10
+        m_hi = mart_df["Pred. €/kg"].max() + 0.10
         fig_m = go.Figure(go.Bar(
             x=mart_df["Mart"], y=mart_df["Pred. €/kg"],
             marker_color=colors,
@@ -1262,7 +1309,9 @@ def tab_calculator(df):
                         annotation_position="top left")
         fig_m.update_layout(title="Predicted €/kg at Target Weight Across All Marts",
                             xaxis_title="Mart", yaxis_title="Predicted €/kg",
-                            xaxis_tickangle=-40, height=400, **_chart_layout())
+                            xaxis_tickangle=-40, height=400,
+                            yaxis=dict(range=[m_lo, m_hi]),
+                            **_chart_layout())
         _show_chart(fig_m)
         if best_mart != mart_val:
             sel_val = mart_df[mart_df["Mart"] == mart_val]["Pred. Value"].values[0]
@@ -1417,10 +1466,13 @@ def tab_factory(fp: pd.DataFrame):
             hovertemplate=f"<b>{cat}</b><br>%{{x|%d %b}}: €%{{y:.3f}}/kg<extra></extra>",
         ))
 
+    r3_data = weekly[weekly["category"] == "Steer"]
+    trend_lo = r3_data["lo"].min() - 0.10 if not r3_data.empty else None
+    trend_hi = r3_data["hi"].max() + 0.10 if not r3_data.empty else None
     fig_trend.update_layout(
         height=320,
         legend=dict(orientation="h", y=1.08, font=dict(color=FB_DARK)),
-        yaxis_title="€/kg",
+        yaxis=dict(title="€/kg", range=[trend_lo, trend_hi]),
         hovermode="x unified",
         **_chart_layout(),
     )
@@ -1651,7 +1703,7 @@ def main():
         "🏭 Factory Prices",
     ])
 
-    with tab1: tab_overview(df)
+    with tab1: tab_overview(df, fp)
     with tab2: tab_explorer(df)
     with tab3: tab_breed_mart(df)
     with tab4: tab_tracker(df)

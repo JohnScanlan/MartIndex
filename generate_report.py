@@ -47,10 +47,11 @@ RECIPIENTS = [
     "johnscanlan52@yahoo.ie",
     "michaelscanlan05@yahoo.com",
     "margaretscanlan14@hotmail.com",
+    "mulkerrinsdarragh@gmail.com",
 ]
 
 SMTP_HOST    = "smtp.gmail.com"
-SMTP_PORT    = 587
+SMTP_PORT    = 465
 SMTP_TIMEOUT = 30   # seconds - prevents overnight hangs
 
 REGION_MAP = {
@@ -900,20 +901,28 @@ def get_smtp_credentials():
     return os.environ.get("SMTP_USER"), os.environ.get("SMTP_PASS")
 
 
-def send_email(pdf_path: Path):
+def send_email(pdf_path: Path, warnings: list[str] | None = None):
     user, pwd = get_smtp_credentials()
     if not user or not pwd:
         print("  [WARN] No SMTP credentials. Skipping email.")
         return
 
-    today = date.today().isoformat()
+    warnings = warnings or []
+    today    = date.today().isoformat()
+    subject  = f"MartIndex Daily Report - {today}"
+    if warnings:
+        subject = f"[DATA WARNING] {subject}"
+
+    body = f"Please find attached the MartIndex daily cattle market report for {today}.\n\n"
+    if warnings:
+        body = "DATA WARNINGS:\n" + "\n".join(f"  - {w}" for w in warnings) + "\n\n" + body
+    body += "This email was generated automatically.\n"
+
     msg = MIMEMultipart()
     msg["From"]    = user
     msg["To"]      = ", ".join(RECIPIENTS)
-    msg["Subject"] = f"MartIndex Daily Report - {today}"
-    msg.attach(MIMEText(
-        f"Please find attached the MartIndex daily cattle market report for {today}.\n\n"
-        "This email was generated automatically.\n", "plain"))
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
 
     with open(pdf_path, "rb") as f:
         part = MIMEBase("application", "octet-stream")
@@ -924,9 +933,7 @@ def send_email(pdf_path: Path):
         msg.attach(part)
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
-            server.ehlo()
-            server.starttls()
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=SMTP_TIMEOUT) as server:
             server.login(user, pwd)
             server.sendmail(user, RECIPIENTS, msg.as_string())
         print(f"  Email sent to {len(RECIPIENTS)} recipients.")
@@ -946,12 +953,30 @@ def main():
     df_today = get_today_df(df_valid)
     print(f"Building PDF for {len(df_today):,} lots...")
 
+    warnings: list[str] = []
+    today_str = date.today().isoformat()
+
+    latest_mart = df_all["scraped_date"].max()
+    if pd.isna(latest_mart) or latest_mart.strftime("%Y-%m-%d") != today_str:
+        days_stale = (date.today() - latest_mart.date()).days if not pd.isna(latest_mart) else "?"
+        msg = f"Mart data last updated {latest_mart.date()} ({days_stale} day(s) ago) — no new lots scraped today"
+        print(f"  WARNING: {msg}")
+        warnings.append(msg)
+
     meta = json.loads(META_JSON.read_text()) if META_JSON.exists() else None
 
     report = Report(orientation="P", unit="mm", format="A4")
     report.set_auto_page_break(auto=True, margin=12)
 
     fp = load_factory_data()
+    if not fp.empty:
+        latest_factory = fp["report_date"].max()
+        if not pd.isna(latest_factory):
+            factory_days = (date.today() - latest_factory.date()).days
+            if factory_days > 10:
+                msg = f"Factory price data last updated {latest_factory.date()} ({factory_days} day(s) ago) — run prepare_factory_prices.py"
+                print(f"  WARNING: {msg}")
+                warnings.append(msg)
 
     page1_market_overview(report, df_valid, fp)
     page2_price_tables(report, df_valid, fp)
@@ -962,7 +987,7 @@ def main():
     print(f"  Report saved → {REPORT_PATH.name}")
 
     print("Sending email...")
-    send_email(REPORT_PATH)
+    send_email(REPORT_PATH, warnings)
 
     for f in DIR.glob("_chart_*.png"):
         f.unlink(missing_ok=True)

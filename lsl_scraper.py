@@ -20,6 +20,7 @@ from bs4 import BeautifulSoup
 from pathlib import Path
 from datetime import date as dt_date, datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from data_utils import safe_append_csv
 
 DIR        = Path(__file__).parent
 OUTPUT_CSV = DIR / "lsl_lots.csv"
@@ -338,16 +339,10 @@ def main():
     print(f"\n  {unchanged} mart(s) unchanged / no cattle sold")
 
     if all_rows:
-        new_df = pd.DataFrame(all_rows, columns=CSV_FIELDS)
-        if OUTPUT_CSV.exists():
-            old_df = pd.read_csv(OUTPUT_CSV)
-            df = pd.concat([old_df, new_df], ignore_index=True)
-            df = df.drop_duplicates(subset=["val_code"])
-        else:
-            df = new_df
-        df.to_csv(OUTPUT_CSV, index=False)
-        print(f"  Done. {len(all_rows):,} new rows → {OUTPUT_CSV.name}  "
-              f"| {len(df):,} total rows")
+        added = safe_append_csv(OUTPUT_CSV, all_rows, CSV_FIELDS, dedup_key=("val_code",))
+        total = len(pd.read_csv(OUTPUT_CSV))
+        print(f"  Done. {added:,} new rows → {OUTPUT_CSV.name}  "
+              f"| {total:,} total rows")
     else:
         print("  No new data today.")
 
