@@ -25,8 +25,10 @@ from data_utils import safe_append_csv
 DIR        = Path(__file__).parent
 OUTPUT_CSV = DIR / "lsl_lots.csv"
 BASE_URL   = "https://www.livestock-live.com"
-WORKERS    = 6
+WORKERS    = 4     # the site 429s on bursts; 4 in flight is comfortably under
 DELAY      = 0.5   # seconds between requests per thread
+RETRY_ATTEMPTS = 4
+BACKOFF_BASE   = 2.0   # seconds; doubles each attempt (2, 4, 8)
 
 CSV_FIELDS = [
     "mart", "mart_code", "sale_date", "lot", "auction_id",
@@ -48,30 +50,72 @@ def make_session():
     return s
 
 
-def get_mart_codes(session) -> list[str]:
-    """Fetch all Irish mart codes from the locations page."""
+# Venues that appear under country="Ireland" but are not cattle marts
+# (shows, breed societies, machinery sales).
+EXCLUDE_CODES = {
+    "ALEXL", "ASTRAS", "BENTH", "BROCKA", "CANECFU", "CMFA",
+    "COOLEY", "DOWNP", "DRAPER", "DUNGA", "DUNGAN", "EHGC",
+    "FEAGASCTRU", "FEOIL", "GRANA", "GVMKC", "INISHO", "KINGD",
+    "MIDKER", "MILFORD", "OMAGH", "OZBEK", "PLUMBR", "POORF",
+    "RUGBY", "SUBGAN", "TAAFFE", "TJCOXL", "TKHF", "TULLSHOW",
+    "WFRTBRS",
+}
+
+# Used when the locations page can't be reached. Covers every code seen in
+# lsl_lots.csv to date, so a fetch failure degrades to stale names rather than
+# to the placeholder that previously poisoned the mart column.
+FALLBACK_MARTS = {
+    "CAHIR":   "Cahir Mart (Cork Marts)",
+    "CASTL":   "Castleisland Co-op Mart",
+    "CORRIN":  "Corrin Mart (Cork Marts)",
+    "DINGLE":  "Dingle Mart",
+    "LISTO":   "Listowel Mart",
+    "M100":    "Carnew Mart",
+    "M101":    "Delvin Mart",
+    "M162":    "Ballinakill Mart",
+    "M170":    "Kilmallock Mart",
+    "M186":    "Carnaross Mart",
+    "M198":    "Tullamore Mart",
+    "M248":    "Abbeyfeale Mart",
+    "M262":    "Gortatlea Mart",
+    "M295":    "ManorHamilton Mart",
+    "M303":    "Cootehill Livestock Mart",
+    "NEWPORT": "Newport Mart",
+    "SIXMIL":  "Sixmilebridge Mart",
+    "WRM":     "Waterford Ross Mart",
+}
+
+
+def get_mart_locations(session) -> dict[str, str]:
+    """
+    Fetch Irish cattle marts from the locations page as {code: mart_name}.
+
+    Each venue is a <div class="locationitem" location="Gortatlea Mart"
+    country="Ireland"> wrapping a link to /OnlineCatalogue-<CODE>. The
+    country attribute is what separates Irish marts from UK/other ones —
+    reading it beats maintaining an exclusion list by hand.
+    """
     try:
         resp = session.get(f"{BASE_URL}/Locations-Livestock", timeout=15)
-        codes = re.findall(r'/OnlineCatalogue-([A-Z0-9]+)', resp.text)
-        # Filter out non-Irish / non-cattle codes (UK, Spain, etc.)
-        exclude = {"ALEXL", "ASTRAS", "BENTH", "BROCKA", "CANECFU", "CMFA",
-                   "COOLEY", "DOWNP", "DRAPER", "DUNGA", "DUNGAN", "EHGC",
-                   "FEAGASCTRU", "FEOIL", "GRANA", "GVMKC", "INISHO", "KINGD",
-                   "MIDKER", "MILFORD", "OMAGH", "OZBEK", "PLUMBR", "POORF",
-                   "RUGBY", "SUBGAN", "TAAFFE", "TJCOXL", "TKHF", "TULLSHOW",
-                   "WFRTBRS"}
-        return sorted(set(codes) - exclude)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        marts: dict[str, str] = {}
+        for div in soup.select(".locationitem"):
+            if div.get("country", "").strip() != "Ireland":
+                continue
+            name = div.get("location", "").strip()
+            m = re.search(r'/OnlineCatalogue-([A-Z0-9]+)', str(div))
+            if m and name and m.group(1) not in EXCLUDE_CODES:
+                marts[m.group(1)] = name
+
+        if not marts:
+            raise ValueError("locations page returned no Irish marts")
+        return marts
+
     except Exception as e:
-        print(f"  [WARN] Could not fetch mart list: {e}")
-        # Fallback hardcoded list of known Irish cattle marts
-        return [
-            "BALLIN", "BALLYM", "CAHIR", "CASTL", "CORRIN", "DINGLE",
-            "DROMC", "ENNIS", "GLENA", "GORT", "HEADF", "KANTURK",
-            "KENMA", "KILFEN", "KILRU", "LISTO", "M100", "M101", "M102",
-            "M162", "M166", "M170", "M186", "M198", "M248", "M262",
-            "M295", "M303", "MOHILL", "MWLIS", "NEWPORT", "SCARIFF",
-            "SIXMIL", "TIPPE", "TIPPEM", "WRM",
-        ]
+        print(f"  [WARN] Could not fetch mart list ({e}) — using fallback names")
+        return dict(FALLBACK_MARTS)
 
 
 def parse_age_months(age_str: str):
@@ -196,35 +240,44 @@ def parse_lot_text(text: str) -> dict:
     return result
 
 
-def get_mart_name(soup: BeautifulSoup, mart_code: str) -> str:
-    """Extract mart name from page."""
-    for sel in ["h1", ".mart-title", ".page-title", "h2"]:
-        el = soup.select_one(sel)
-        if el:
-            txt = el.text.strip().split("\n")[0].strip()
-            if txt and len(txt) > 2:
-                return txt
-    if soup.title:
-        parts = re.split(r'[|\-]', soup.title.text)
-        if parts:
-            return parts[0].strip()
-    return mart_code
-
-
 # ── Per-mart scraper ──────────────────────────────────────────────────────────
 
-def scrape_mart(mart_code: str, existing_ids: set) -> tuple[list[dict], str, int]:
+def scrape_mart(mart_code: str, mart_name: str,
+                existing_ids: set) -> tuple[list[dict], str, int]:
     """
     Scrape last sale for one mart.
     Returns (new_rows, mart_code, total_lots_on_page).
+
+    mart_name comes from the locations page. It must NOT be read off the
+    catalogue page — every mart's <h1> there is the site name ("LSL
+    Auctions"), which is what previously collapsed all 18 marts into one.
     """
     session = make_session()
     url = f"{BASE_URL}/OnlineCatalogue-{mart_code}"
-    try:
-        resp = session.get(url, params={"SearchDateRange": "Last"},
-                           timeout=20)
-        resp.raise_for_status()
-    except Exception as e:
+    resp = None
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            resp = session.get(url, params={"SearchDateRange": "Last"},
+                               timeout=20)
+            # The site rate-limits bursts. Back off and retry rather than
+            # dropping the mart — a silent 429 looks identical to "no sale".
+            if resp.status_code == 429 or resp.status_code >= 500:
+                if attempt == RETRY_ATTEMPTS:
+                    print(f"  {mart_code:15s} giving up after {attempt} attempts "
+                          f"(HTTP {resp.status_code})")
+                    return [], mart_code, 0
+                wait = float(resp.headers.get("Retry-After") or BACKOFF_BASE * 2 ** (attempt - 1))
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            break
+        except Exception as exc:
+            if attempt == RETRY_ATTEMPTS:
+                print(f"  {mart_code:15s} fetch failed: {exc}")
+                return [], mart_code, 0
+            time.sleep(BACKOFF_BASE * 2 ** (attempt - 1))
+
+    if resp is None:
         return [], mart_code, 0
 
     soup = BeautifulSoup(resp.text, "html.parser")
@@ -232,7 +285,6 @@ def scrape_mart(mart_code: str, existing_ids: set) -> tuple[list[dict], str, int
     if not lot_divs:
         return [], mart_code, 0
 
-    mart_name = get_mart_name(soup, mart_code)
     today     = dt_date.today().isoformat()
     rows      = []
 
@@ -312,17 +364,17 @@ def main():
         existing_ids = set()
     print(f"  Existing records: {len(existing_ids):,}")
 
-    session    = make_session()
-    mart_codes = get_mart_codes(session)
-    print(f"  Scraping {len(mart_codes)} Irish cattle marts…\n")
+    session = make_session()
+    marts   = get_mart_locations(session)
+    print(f"  Scraping {len(marts)} Irish cattle marts…\n")
 
     all_rows  = []
     unchanged = 0
 
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:
         futures = {
-            executor.submit(scrape_mart, code, existing_ids): code
-            for code in mart_codes
+            executor.submit(scrape_mart, code, name, existing_ids): code
+            for code, name in sorted(marts.items())
         }
         for future in as_completed(futures):
             try:

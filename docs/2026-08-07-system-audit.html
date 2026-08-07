@@ -1,0 +1,964 @@
+<title>MartIndex — System Schematic</title>
+
+<style>
+  /* ─────────────────────────────────────────────────────────────
+     Tokens — complete light palette on bare :root
+     ───────────────────────────────────────────────────────────── */
+  :root {
+    --navy:    #1B2A4A;
+    --navy-lt: #2C3E60;
+    --gold:    #C9A84C;
+    --gold-dp: #9A7C24;
+    --green:   #276749;
+    --rust:    #A85A1E;
+    --red:     #9B2335;
+
+    --paper:   #F5F5F2;
+    --card:    #FFFFFF;
+    --sunk:    #EDEDE8;
+    --rule:    #DCDFE6;
+    --rule-sf: #E8EAEF;
+    --ink:     #16233F;
+    --muted:   #5E6B85;
+    --faint:   #8895AC;
+
+    --ok-bg:   #E7EFE9;
+    --warn-bg: #F6ECE2;
+    --bad-bg:  #F5E4E6;
+
+    --shadow:  0 1px 2px rgba(22,35,63,.06), 0 4px 16px rgba(22,35,63,.05);
+
+    --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans:  ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono:  ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --navy:    #A9BBDC;
+      --navy-lt: #8598BC;
+      --gold:    #D9B95E;
+      --gold-dp: #E2C77A;
+      --green:   #5FAF80;
+      --rust:    #D98A46;
+      --red:     #E0697C;
+
+      --paper:   #0F1520;
+      --card:    #18202F;
+      --sunk:    #131A27;
+      --rule:    #2A3547;
+      --rule-sf: #212B3B;
+      --ink:     #E4EAF4;
+      --muted:   #93A0B8;
+      --faint:   #6E7C96;
+
+      --ok-bg:   #16281F;
+      --warn-bg: #2B1F14;
+      --bad-bg:  #2B161C;
+
+      --shadow:  0 1px 2px rgba(0,0,0,.4), 0 4px 18px rgba(0,0,0,.3);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --navy:    #A9BBDC;
+    --navy-lt: #8598BC;
+    --gold:    #D9B95E;
+    --gold-dp: #E2C77A;
+    --green:   #5FAF80;
+    --rust:    #D98A46;
+    --red:     #E0697C;
+
+    --paper:   #0F1520;
+    --card:    #18202F;
+    --sunk:    #131A27;
+    --rule:    #2A3547;
+    --rule-sf: #212B3B;
+    --ink:     #E4EAF4;
+    --muted:   #93A0B8;
+    --faint:   #6E7C96;
+
+    --ok-bg:   #16281F;
+    --warn-bg: #2B1F14;
+    --bad-bg:  #2B161C;
+
+    --shadow:  0 1px 2px rgba(0,0,0,.4), 0 4px 18px rgba(0,0,0,.3);
+  }
+
+  /* ─────────────────────────────────────────────────────────────
+     Base
+     ───────────────────────────────────────────────────────────── */
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 0 24px 96px;
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  .prose { max-width: 68ch; }
+
+  h1, h2, h3 { font-family: var(--serif); text-wrap: balance; margin: 0; font-weight: 600; }
+
+  a { color: var(--gold-dp); }
+
+  code, .mono { font-family: var(--mono); font-size: .86em; }
+
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  /* ── Masthead ─────────────────────────────────────────────── */
+  header.masthead {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 56px 0 28px;
+    border-bottom: 2px solid var(--navy);
+  }
+  header.masthead h1 { font-size: 44px; line-height: 1.05; letter-spacing: -.02em; color: var(--ink); }
+  header.masthead .sub { font-size: 17px; color: var(--muted); max-width: 62ch; }
+  .stamp {
+    display: flex; flex-wrap: wrap; gap: 8px 22px;
+    font-family: var(--mono); font-size: 12px; color: var(--faint);
+    padding-top: 4px;
+  }
+
+  /* ── Section rhythm ───────────────────────────────────────── */
+  section { padding-top: 60px; }
+  .sec-head { display: flex; flex-direction: column; gap: 6px; margin-bottom: 22px; }
+  .sec-head h2 { font-size: 27px; letter-spacing: -.01em; color: var(--ink); }
+  .sec-head p { margin: 0; color: var(--muted); font-size: 15.5px; max-width: 68ch; }
+
+  /* ── Health strip ─────────────────────────────────────────── */
+  .health {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+    gap: 12px; margin-top: 30px;
+  }
+  .hcard {
+    background: var(--card); border: 1px solid var(--rule);
+    border-top: 3px solid var(--st); border-radius: 3px;
+    padding: 14px 15px 15px; box-shadow: var(--shadow);
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .hcard .lbl { font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--faint); }
+  .hcard .val { font-family: var(--serif); font-size: 19px; font-weight: 600; color: var(--st); line-height: 1.15; }
+  .hcard .note { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+  .st-ok   { --st: var(--green); }
+  .st-warn { --st: var(--rust); }
+  .st-bad  { --st: var(--red); }
+
+  /* ── Figures ──────────────────────────────────────────────── */
+  figure {
+    margin: 0; background: var(--card);
+    border: 1px solid var(--rule); border-radius: 4px;
+    padding: 22px 22px 18px; box-shadow: var(--shadow);
+  }
+  .figscroll { overflow-x: auto; }
+  figure svg { display: block; width: 100%; min-width: 900px; height: auto; color: var(--ink); }
+  figcaption {
+    margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--rule-sf);
+    font-size: 13.5px; color: var(--muted); line-height: 1.55; max-width: 84ch;
+  }
+  figcaption b { color: var(--ink); font-weight: 600; }
+
+  /* ── Tables ───────────────────────────────────────────────── */
+  .tscroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--card); box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 720px; }
+  thead th {
+    text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--faint);
+    padding: 12px 14px; border-bottom: 1.5px solid var(--rule);
+    background: var(--sunk); white-space: nowrap;
+  }
+  tbody td { padding: 11px 14px; border-bottom: 1px solid var(--rule-sf); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.f { font-family: var(--mono); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+  td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  td.dim { color: var(--muted); }
+
+  .pill {
+    display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 2px; white-space: nowrap;
+  }
+  .p-ok   { background: var(--ok-bg);   color: var(--green); }
+  .p-warn { background: var(--warn-bg); color: var(--rust);  }
+  .p-bad  { background: var(--bad-bg);  color: var(--red);   }
+
+  .yes { color: var(--green); font-weight: 700; }
+  .no  { color: var(--faint); }
+
+  /* ── Findings ─────────────────────────────────────────────── */
+  .findings { display: flex; flex-direction: column; gap: 14px; }
+  .finding {
+    background: var(--card); border: 1px solid var(--rule);
+    border-left: 4px solid var(--sv); border-radius: 3px;
+    padding: 16px 18px 17px; box-shadow: var(--shadow);
+  }
+  .finding .top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 7px; }
+  .finding h3 { font-size: 18px; color: var(--ink); letter-spacing: -.005em; }
+  .finding .sev {
+    font-size: 10px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase;
+    color: var(--sv); border: 1px solid var(--sv); padding: 2px 7px; border-radius: 2px;
+  }
+  .finding p { margin: 0 0 8px; font-size: 14.5px; color: var(--muted); line-height: 1.6; max-width: 82ch; }
+  .finding p:last-child { margin-bottom: 0; }
+  .finding .fix { font-size: 14px; color: var(--ink); }
+  .finding .fix b { font-family: var(--sans); font-weight: 700; color: var(--sv); }
+  .sv-crit { --sv: var(--red);   }
+  .sv-high { --sv: var(--rust);  }
+  .sv-med  { --sv: var(--gold-dp); }
+  .sv-low  { --sv: var(--muted); }
+
+  /* ── Run order list (a genuine sequence) ──────────────────── */
+  ol.runorder { list-style: none; counter-reset: st; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  ol.runorder li {
+    counter-increment: st; display: flex; gap: 14px; align-items: baseline;
+    padding: 10px 14px; background: var(--card); border: 1px solid var(--rule); border-radius: 3px;
+    font-size: 14px;
+  }
+  ol.runorder li::before {
+    content: counter(st); font-family: var(--mono); font-size: 11px; font-weight: 700;
+    color: var(--gold-dp); border: 1px solid var(--rule); border-radius: 2px;
+    padding: 1px 6px; flex: none;
+  }
+  ol.runorder li .what { font-family: var(--mono); font-size: 12.5px; color: var(--ink); flex: none; }
+  ol.runorder li .why { color: var(--muted); font-size: 13.5px; }
+
+  /* ── SVG shared classes ───────────────────────────────────── */
+  .bx  { fill: var(--card); stroke: var(--rule); stroke-width: 1.5; }
+  .bx-src { fill: var(--sunk); stroke: var(--navy-lt); stroke-width: 1.5; }
+  .bx-bad { fill: var(--bad-bg); stroke: var(--red); stroke-width: 1.5; }
+  .bx-warn{ fill: var(--warn-bg); stroke: var(--rust); stroke-width: 1.5; }
+  .bx-ok  { fill: var(--ok-bg); stroke: var(--green); stroke-width: 1.5; }
+  .plate  { fill: none; stroke: var(--gold); stroke-width: 1.5; stroke-dasharray: 5 4; }
+
+  .t-ttl { font-family: var(--mono); font-size: 13px; font-weight: 600; fill: var(--ink); }
+  .t-sub { font-family: var(--sans); font-size: 11.5px; fill: var(--muted); }
+  .t-num { font-family: var(--mono); font-size: 11.5px; fill: var(--gold-dp); font-weight: 600; }
+  .t-band{ font-family: var(--sans); font-size: 10.5px; font-weight: 700; letter-spacing: .14em; fill: var(--faint); }
+  .t-edge{ font-family: var(--sans); font-size: 10.5px; fill: var(--faint); }
+  .t-bad { font-family: var(--sans); font-size: 11px; font-weight: 700; fill: var(--red); }
+  .t-day { font-family: var(--sans); font-size: 11.5px; font-weight: 600; fill: var(--muted); }
+
+  .ln  { stroke: var(--navy-lt); stroke-width: 1.5; fill: none; }
+  .ln-bad { stroke: var(--red); stroke-width: 2; fill: none; }
+  .ln-dash{ stroke: var(--navy-lt); stroke-width: 1.5; fill: none; stroke-dasharray: 4 4; }
+  .rail { stroke: var(--rule); stroke-width: 1.5; }
+
+  @media (max-width: 720px) {
+    body { padding: 0 16px 72px; }
+    header.masthead h1 { font-size: 32px; }
+    .sec-head h2 { font-size: 23px; }
+    figure { padding: 14px 14px 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <div class="eyebrow">System review &middot; 7 August 2026</div>
+  <h1>MartIndex</h1>
+  <div class="sub">
+    An Irish cattle-market data platform: four scrapers feeding six flat files, two Streamlit
+    dashboards, a nightly emailed PDF, and two delivery paths off the machine. This is what is
+    actually built, what actually runs, and where the wiring has come apart.
+  </div>
+  <div class="stamp">
+    <span>5,567 lines of Python</span>
+    <span>13 modules</span>
+    <span>241,519 mart lots</span>
+    <span>197,052 factory prices</span>
+    <span>~100 MB on disk</span>
+  </div>
+</header>
+
+<div class="health">
+  <div class="hcard st-ok">
+    <div class="lbl">Collection</div>
+    <div class="val">Healthy</div>
+    <div class="note">All four sources reachable. Latest lot 6 Aug, latest factory week 2 Aug.</div>
+  </div>
+  <div class="hcard st-ok">
+    <div class="lbl">Nightly report</div>
+    <div class="val">Healthy</div>
+    <div class="note">PDF built and emailed to 4 recipients every night without a miss.</div>
+  </div>
+  <div class="hcard st-bad">
+    <div class="lbl">Web deployment</div>
+    <div class="val">Down 105 days</div>
+    <div class="note">Push rejected since 24 Apr. 89 commits stuck locally; Streamlit Cloud frozen.</div>
+  </div>
+  <div class="hcard st-warn">
+    <div class="lbl">Factory feed</div>
+    <div class="val">Off schedule</div>
+    <div class="note">Cron last fired 18 Jun. Ran manually today after 19 days stale.</div>
+  </div>
+  <div class="hcard st-warn">
+    <div class="lbl">Drive backup</div>
+    <div class="val">Degraded</div>
+    <div class="note">launchd reports exit 78. Last successful copy 27 Jul.</div>
+  </div>
+  <div class="hcard st-warn">
+    <div class="lbl">Price model</div>
+    <div class="val">112 days old</div>
+    <div class="note">Trained on 54k lots; 241k now available. Nothing schedules a retrain.</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <h2>How data gets in</h2>
+    <p>
+      Four independent lanes, each one source → one collector → one file. Nothing shares a process
+      and nothing shares a database — the join happens later, in whichever app reads the folder.
+    </p>
+  </div>
+
+  <figure>
+    <div class="figscroll">
+      <svg viewBox="0 0 1180 596" role="img"
+           aria-label="Four parallel ingestion lanes: martbids.ie, livestock-live.com, Open-Meteo and DAFM BeefPriceWatch each feed one scraper, which writes one CSV into a shared local folder; two derive scripts then produce the cleaned factory file and the LightGBM model.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <!-- filesystem plate -->
+        <rect class="plate" x="26" y="286" width="1128" height="266" rx="5"/>
+        <text class="t-band" x="44" y="536" style="letter-spacing:.1em">
+          LOCAL FILESYSTEM &nbsp;·&nbsp; /Documents/Kaggle/grass &nbsp;·&nbsp; flat CSV + Parquet, no database
+        </text>
+
+        <!-- ── Band 1: sources ── -->
+        <text class="t-band" x="58" y="56">EXTERNAL SOURCES</text>
+
+        <g color="var(--navy-lt)">
+          <rect class="bx-src" x="58"  y="70" width="248" height="64" rx="3"/>
+          <text class="t-ttl" x="74" y="97">martbids.ie</text>
+          <text class="t-sub" x="74" y="116">REST API · login token · 38 marts</text>
+
+          <rect class="bx-src" x="330" y="70" width="248" height="64" rx="3"/>
+          <text class="t-ttl" x="346" y="97">livestock-live.com</text>
+          <text class="t-sub" x="346" y="116">public HTML · no auth · 18 marts</text>
+
+          <rect class="bx-src" x="602" y="70" width="248" height="64" rx="3"/>
+          <text class="t-ttl" x="618" y="97">Open-Meteo</text>
+          <text class="t-sub" x="618" y="116">archive API · free, no key</text>
+
+          <rect class="bx-src" x="874" y="70" width="248" height="64" rx="3"/>
+          <text class="t-ttl" x="890" y="97">DAFM BeefPriceWatch</text>
+          <text class="t-sub" x="890" y="116">REST API · 28 processing plants</text>
+        </g>
+
+        <!-- ── Band 2: collectors ── -->
+        <text class="t-band" x="58" y="178">COLLECT</text>
+
+        <g color="var(--navy-lt)">
+          <path class="ln" d="M182,134 V186" marker-end="url(#ah)"/>
+          <path class="ln" d="M454,134 V186" marker-end="url(#ah)"/>
+          <path class="ln" d="M726,134 V186" marker-end="url(#ah)"/>
+          <path class="ln" d="M998,134 V186" marker-end="url(#ah)"/>
+        </g>
+        <text class="t-edge" x="192" y="166">POST, 8 threads</text>
+        <text class="t-edge" x="464" y="166">GET, 6 threads</text>
+        <text class="t-edge" x="736" y="166">GET, batched</text>
+        <text class="t-edge" x="1008" y="166">GET, 3-week window</text>
+
+        <rect class="bx" x="58"  y="192" width="248" height="64" rx="3"/>
+        <text class="t-ttl" x="74" y="219">martbids_scraper.py</text>
+        <text class="t-sub" x="74" y="238">per-animal detail + ICBF indices</text>
+
+        <rect class="bx" x="330" y="192" width="248" height="64" rx="3"/>
+        <text class="t-ttl" x="346" y="219">lsl_scraper.py</text>
+        <text class="t-sub" x="346" y="238">parses last-sale catalogue text</text>
+
+        <rect class="bx" x="602" y="192" width="248" height="64" rx="3"/>
+        <text class="t-ttl" x="618" y="219">fetch_weather.py</text>
+        <text class="t-sub" x="618" y="238">mart_coords.py · 74 lat/lon pairs</text>
+
+        <rect class="bx" x="874" y="192" width="248" height="64" rx="3"/>
+        <text class="t-ttl" x="890" y="219">scrape_factory_prices.py</text>
+        <text class="t-sub" x="890" y="238">headline + conformation × fat grid</text>
+
+        <!-- ── Band 3: raw files ── -->
+        <text class="t-band" x="58" y="306">RAW STORE</text>
+
+        <g color="var(--navy-lt)">
+          <path class="ln" d="M182,256 V308" marker-end="url(#ah)"/>
+          <path class="ln" d="M454,256 V308" marker-end="url(#ah)"/>
+          <path class="ln" d="M726,256 V308" marker-end="url(#ah)"/>
+          <path class="ln" d="M998,256 V308" marker-end="url(#ah)"/>
+        </g>
+        <text class="t-edge" x="192" y="288">append, dedup on val_code</text>
+        <text class="t-edge" x="464" y="288">append, dedup on val_code</text>
+        <text class="t-edge" x="736" y="288">append, dedup mart × date</text>
+        <text class="t-edge" x="1008" y="288">append, dedup 5-key</text>
+
+        <rect class="bx" x="58"  y="314" width="248" height="64" rx="3"/>
+        <text class="t-ttl" x="74" y="340">sold_lots.csv</text>
+        <text class="t-num" x="74" y="360">190,572 lots · 29 cols</text>
+
+        <rect class="bx" x="330" y="314" width="248" height="64" rx="3"/>
+        <text class="t-ttl" x="346" y="340">lsl_lots.csv</text>
+        <text class="t-num" x="346" y="360">50,947 lots · 15 cols</text>
+
+        <rect class="bx" x="602" y="314" width="248" height="64" rx="3"/>
+        <text class="t-ttl" x="618" y="340">weather_cache.csv</text>
+        <text class="t-num" x="618" y="360">983 mart-days</text>
+
+        <rect class="bx" x="874" y="314" width="248" height="64" rx="3"/>
+        <text class="t-ttl" x="890" y="340">factory_prices.csv</text>
+        <text class="t-num" x="890" y="360">197,052 rows · 28 plants</text>
+
+        <!-- ── Band 4: derived ── -->
+        <text class="t-band" x="58" y="428">DERIVE</text>
+
+        <g color="var(--navy-lt)">
+          <path class="ln" d="M182,378 V404 H442"/>
+          <path class="ln" d="M726,378 V404 H466"/>
+          <path class="ln" d="M454,378 V430" marker-end="url(#ah)"/>
+          <path class="ln" d="M998,378 V430" marker-end="url(#ah)"/>
+        </g>
+
+        <rect class="bx" x="330" y="436" width="248" height="76" rx="3"/>
+        <text class="t-ttl" x="346" y="462">train_model.py</text>
+        <text class="t-sub" x="346" y="480">LightGBM + Optuna → €/kg</text>
+        <text class="t-sub" x="346" y="498">cattle_model.pkl · shap_*.pkl</text>
+
+        <rect class="bx" x="874" y="436" width="248" height="76" rx="3"/>
+        <text class="t-ttl" x="890" y="462">prepare_factory_prices.py</text>
+        <text class="t-sub" x="890" y="480">grade split, price sanity filter</text>
+        <text class="t-sub" x="890" y="498">factory_prices_clean.csv + .parquet</text>
+      </svg>
+    </div>
+    <figcaption>
+      <b>Each source is fully independent.</b> Every collector appends with de-duplication and an
+      atomic temp-write-verify-rename through <code>data_utils.py</code>, so a crashed run cannot
+      corrupt a file — it simply adds nothing. The one hidden coupling is ordering:
+      <code>fetch_weather.py</code> reads <code>sold_lots.csv</code> to decide which mart × date pairs
+      it needs, so it must run <em>after</em> the MartBids scrape or it fetches nothing new.
+      <code>train_model.py</code> is the only box here that no schedule ever invokes.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <h2>How data gets out</h2>
+    <p>
+      Five consumers read the same folder. Three of their four exits work; the one that carries the
+      dashboards to the public web has been severed since April.
+    </p>
+  </div>
+
+  <figure>
+    <div class="figscroll">
+      <svg viewBox="0 0 1180 620" role="img"
+           aria-label="Five consumers read the shared local folder: two Streamlit dashboards which run locally, the PDF report generator which emails four recipients, git_push.py whose push to GitHub fails so Streamlit Cloud is frozen at 24 April, and the rclone backup script which copies to Google Drive.">
+        <defs>
+          <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <!-- store bar -->
+        <rect class="plate" x="26" y="40" width="1128" height="56" rx="5"/>
+        <text class="t-ttl" x="44" y="66">sold_lots · lsl_lots · weather_cache · factory_prices_clean · cattle_model · shap</text>
+        <text class="t-sub" x="44" y="84">the shared local folder — every consumer below re-reads these files from disk on each run</text>
+
+        <!-- ── consumers ── -->
+        <text class="t-band" x="40" y="158">CONSUME</text>
+
+        <g color="var(--navy-lt)">
+          <path class="ln" d="M140,96 V170"  marker-end="url(#ah2)"/>
+          <path class="ln" d="M365,96 V170"  marker-end="url(#ah2)"/>
+          <path class="ln" d="M590,96 V170"  marker-end="url(#ah2)"/>
+          <path class="ln" d="M815,96 V170"  marker-end="url(#ah2)"/>
+          <path class="ln" d="M1040,96 V170" marker-end="url(#ah2)"/>
+        </g>
+
+        <rect class="bx" x="40" y="176" width="200" height="82" rx="3"/>
+        <text class="t-ttl" x="54" y="202">dashboard.py</text>
+        <text class="t-sub" x="54" y="220">MartIndex · 6 tabs</text>
+        <text class="t-sub" x="54" y="238">farmer-facing · 1,715 ln</text>
+
+        <rect class="bx" x="265" y="176" width="200" height="82" rx="3"/>
+        <text class="t-ttl" x="279" y="202">bank_dashboard.py</text>
+        <text class="t-sub" x="279" y="220">Lending · 6 tabs</text>
+        <text class="t-sub" x="279" y="238">lender-facing · 889 ln</text>
+
+        <rect class="bx" x="490" y="176" width="200" height="82" rx="3"/>
+        <text class="t-ttl" x="504" y="202">generate_report.py</text>
+        <text class="t-sub" x="504" y="220">4-page PDF, nightly</text>
+        <text class="t-sub" x="504" y="238">charts via matplotlib</text>
+
+        <rect class="bx-bad" x="715" y="176" width="200" height="82" rx="3"/>
+        <text class="t-ttl" x="729" y="202">git_push.py</text>
+        <text class="t-sub" x="729" y="220">commits 8 data files</text>
+        <text class="t-sub" x="729" y="238">omits factory_prices_clean</text>
+
+        <rect class="bx-warn" x="940" y="176" width="200" height="82" rx="3"/>
+        <text class="t-ttl" x="954" y="202">backup_to_gdrive.sh</text>
+        <text class="t-sub" x="954" y="220">rclone copy, weekly</text>
+        <text class="t-sub" x="954" y="238">11 files → dated folder</text>
+
+        <!-- ── destinations ── -->
+        <text class="t-band" x="40" y="330">DELIVER</text>
+
+        <g color="var(--navy-lt)">
+          <path class="ln" d="M140,258 V342" marker-end="url(#ah2)"/>
+          <path class="ln" d="M365,258 V342" marker-end="url(#ah2)"/>
+          <path class="ln" d="M590,258 V342" marker-end="url(#ah2)"/>
+          <path class="ln" d="M1040,258 V342" marker-end="url(#ah2)"/>
+        </g>
+        <text class="t-edge" x="600" y="308">SMTP · Gmail SSL</text>
+
+        <!-- severed edge -->
+        <g color="var(--red)">
+          <path class="ln-bad" d="M815,258 V296"/>
+          <path d="M807,304 L823,320 M823,304 L807,320" stroke="var(--red)" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+          <path class="ln-bad" d="M815,328 V342" stroke-dasharray="4 4" opacity=".5" marker-end="url(#ah2)"/>
+        </g>
+        <text class="t-bad" x="832" y="316">push rejected</text>
+
+        <rect class="bx-ok" x="40" y="348" width="425" height="76" rx="3"/>
+        <text class="t-ttl" x="54" y="376">streamlit run — on this Mac</text>
+        <text class="t-sub" x="54" y="396">both dashboards work locally and read today&rsquo;s data</text>
+        <text class="t-sub" x="54" y="414">this is currently the only way to see current figures</text>
+
+        <rect class="bx-ok" x="490" y="348" width="200" height="76" rx="3"/>
+        <text class="t-ttl" x="504" y="376">daily_report.pdf</text>
+        <text class="t-sub" x="504" y="396">4 recipients</text>
+        <text class="t-sub" x="504" y="414">sent every night</text>
+
+        <rect class="bx-bad" x="715" y="348" width="200" height="76" rx="3"/>
+        <text class="t-ttl" x="729" y="376">GitHub · MartIndex</text>
+        <text class="t-sub" x="729" y="396">last push 24 Apr</text>
+        <text class="t-sub" x="729" y="414">89 commits behind</text>
+
+        <rect class="bx-warn" x="940" y="348" width="200" height="76" rx="3"/>
+        <text class="t-ttl" x="954" y="376">Google Drive</text>
+        <text class="t-sub" x="954" y="396">drive:MartBids/backups/</text>
+        <text class="t-sub" x="954" y="414">last copy 27 Jul</text>
+
+        <!-- streamlit cloud -->
+        <g color="var(--red)">
+          <path class="ln-bad" d="M815,424 V494" marker-end="url(#ah2)"/>
+        </g>
+        <text class="t-edge" x="828" y="464">auto-deploy</text>
+
+        <rect class="bx-bad" x="715" y="500" width="200" height="76" rx="3"/>
+        <text class="t-ttl" x="729" y="528">Streamlit Cloud</text>
+        <text class="t-sub" x="729" y="548">public dashboards</text>
+        <text class="t-sub" x="729" y="566">serving 24 Apr data</text>
+      </svg>
+    </div>
+    <figcaption>
+      <b>The break is one hop wide.</b> Everything upstream of <code>git_push.py</code> is healthy —
+      the scrape runs, the commit is made — but the push is rejected with
+      <code>Invalid username or token</code>, so the queue grows instead of draining. Two token files
+      exist and they differ: <code>.github_token</code> in the repo, and the one at
+      <code>~/Library/Scripts/MartBids/.github_token</code> that <code>git_push.py</code> actually
+      reads. Note also that <code>git_push.py</code>&rsquo;s file list omits
+      <code>factory_prices_clean.csv</code> — so even after the token is fixed, factory prices still
+      would not reach the deployed dashboards.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <h2>Why the factory feed goes stale</h2>
+    <p>
+      Two schedulers are configured for the same platform and they behave differently when the Mac is
+      asleep. That single difference explains every gap in the data.
+    </p>
+  </div>
+
+  <figure>
+    <div class="figscroll">
+      <svg viewBox="0 0 1180 408" role="img"
+           aria-label="A seven-day timeline for 1 to 7 August 2026. The launchd job fired on all six elapsed days. The cron MartBids job fired only on 2 August and missed six days. The cron factory job was scheduled Monday 3rd and Thursday 6th and fired on neither; it ran only when triggered manually on 7 August.">
+        <defs>
+          <marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <!-- day headers -->
+        <g>
+          <text class="t-day" x="268"  y="40" text-anchor="middle">Sat 1</text>
+          <text class="t-day" x="404"  y="40" text-anchor="middle">Sun 2</text>
+          <text class="t-day" x="540"  y="40" text-anchor="middle">Mon 3</text>
+          <text class="t-day" x="676"  y="40" text-anchor="middle">Tue 4</text>
+          <text class="t-day" x="812"  y="40" text-anchor="middle">Wed 5</text>
+          <text class="t-day" x="948"  y="40" text-anchor="middle">Thu 6</text>
+          <text class="t-day" x="1084" y="40" text-anchor="middle">Fri 7</text>
+        </g>
+        <line class="rail" x1="200" y1="54" x2="1152" y2="54"/>
+
+        <!-- lane 1 : launchd -->
+        <text class="t-ttl" x="24" y="106">launchd</text>
+        <text class="t-sub" x="24" y="124">run_scraper.sh</text>
+        <text class="t-sub" x="24" y="140">daily 21:30</text>
+        <line class="rail" x1="200" y1="112" x2="1152" y2="112"/>
+        <g fill="var(--green)">
+          <circle cx="268" cy="112" r="9"/><circle cx="404" cy="112" r="9"/>
+          <circle cx="540" cy="112" r="9"/><circle cx="676" cy="112" r="9"/>
+          <circle cx="812" cy="112" r="9"/><circle cx="948" cy="112" r="9"/>
+        </g>
+        <circle cx="1084" cy="112" r="8.5" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <text class="t-edge" x="1084" y="139" text-anchor="middle">due 21:30</text>
+
+        <!-- overrun annotation -->
+        <g color="var(--gold-dp)">
+          <path class="ln" d="M958,92 H1074" stroke="var(--gold-dp)" stroke-dasharray="3 3" marker-end="url(#ah3)"/>
+        </g>
+        <text class="t-edge" x="966" y="84" fill="var(--gold-dp)">Thu run started 21:30, finished 03:16 — machine slept mid-run, launchd resumed it</text>
+
+        <!-- lane 2 : cron martbids -->
+        <text class="t-ttl" x="24" y="206">cron</text>
+        <text class="t-sub" x="24" y="224">martbids_scraper.py</text>
+        <text class="t-sub" x="24" y="240">daily 08:00</text>
+        <line class="rail" x1="200" y1="212" x2="1152" y2="212"/>
+        <g fill="none" stroke="var(--red)" stroke-width="1.5">
+          <circle cx="268"  cy="212" r="8.5"/><circle cx="540"  cy="212" r="8.5"/>
+          <circle cx="676"  cy="212" r="8.5"/><circle cx="812"  cy="212" r="8.5"/>
+          <circle cx="948"  cy="212" r="8.5"/><circle cx="1084" cy="212" r="8.5"/>
+        </g>
+        <g stroke="var(--red)" stroke-width="1.6" stroke-linecap="round">
+          <path d="M264,208 l8,8 M272,208 l-8,8"/><path d="M536,208 l8,8 M544,208 l-8,8"/>
+          <path d="M672,208 l8,8 M680,208 l-8,8"/><path d="M808,208 l8,8 M816,208 l-8,8"/>
+          <path d="M944,208 l8,8 M952,208 l-8,8"/><path d="M1080,208 l8,8 M1088,208 l-8,8"/>
+        </g>
+        <circle cx="404" cy="212" r="9" fill="var(--green)"/>
+        <text class="t-edge" x="404" y="239" text-anchor="middle">08:01 — awake</text>
+
+        <!-- lane 3 : cron factory -->
+        <text class="t-ttl" x="24" y="300">cron</text>
+        <text class="t-sub" x="24" y="318">scrape_factory_prices.py</text>
+        <text class="t-sub" x="24" y="334">Mon &amp; Thu 07:00</text>
+        <line class="rail" x1="200" y1="306" x2="1152" y2="306"/>
+        <g fill="none" stroke="var(--red)" stroke-width="1.5">
+          <circle cx="540" cy="306" r="8.5"/><circle cx="948" cy="306" r="8.5"/>
+        </g>
+        <g stroke="var(--red)" stroke-width="1.6" stroke-linecap="round">
+          <path d="M536,302 l8,8 M544,302 l-8,8"/><path d="M944,302 l8,8 M952,302 l-8,8"/>
+        </g>
+        <circle cx="1084" cy="306" r="9" fill="var(--gold)"/>
+        <text class="t-edge" x="1084" y="333" text-anchor="middle">manual, 09:08</text>
+        <text class="t-edge" x="560" y="290" fill="var(--red)">last automatic run: 18 June</text>
+
+        <!-- legend -->
+        <line class="rail" x1="24" y1="360" x2="1152" y2="360"/>
+        <g>
+          <circle cx="34" cy="386" r="7" fill="var(--green)"/>
+          <text class="t-edge" x="48" y="390">ran</text>
+
+          <circle cx="112" cy="386" r="7" fill="none" stroke="var(--red)" stroke-width="1.5"/>
+          <g stroke="var(--red)" stroke-width="1.5" stroke-linecap="round">
+            <path d="M108.5,382.5 l7,7 M115.5,382.5 l-7,7"/>
+          </g>
+          <text class="t-edge" x="126" y="390">scheduled, never fired</text>
+
+          <circle cx="290" cy="386" r="7" fill="var(--gold)"/>
+          <text class="t-edge" x="304" y="390">run by hand today</text>
+
+          <circle cx="430" cy="386" r="6.5" fill="none" stroke="var(--faint)" stroke-width="1.5" stroke-dasharray="3 3"/>
+          <text class="t-edge" x="444" y="390">not yet due</text>
+        </g>
+      </svg>
+    </div>
+    <figcaption>
+      <b>launchd catches up; cron does not.</b> A <code>StartCalendarInterval</code> job that was
+      missed while the machine slept runs as soon as it wakes — which is why the 21:30 chain has not
+      missed a night, and why Thursday&rsquo;s run finished at 03:16 on Friday. A cron entry simply
+      never fires if the machine is not awake at that exact minute, and the minute is gone. Both cron
+      scrape jobs are scheduled in the morning, when this Mac is usually asleep. That is the whole
+      reason the factory feed had drifted 19 days behind before today&rsquo;s manual run.
+    </figcaption>
+  </figure>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <h2>The nightly chain</h2>
+    <p>
+      One launchd job at 21:30 runs five steps in sequence via
+      <code>~/Library/Scripts/MartBids/run_scraper.sh</code>. Order matters here — each step consumes
+      what the one before it wrote.
+    </p>
+  </div>
+
+  <ol class="runorder">
+    <li><span class="what">martbids_scraper.py</span><span class="why">38 marts, per-animal detail and ICBF indices → <code>sold_lots.csv</code></span></li>
+    <li><span class="what">lsl_scraper.py</span><span class="why">18 mart codes from the public catalogue → <code>lsl_lots.csv</code></span></li>
+    <li><span class="what">fetch_weather.py</span><span class="why">reads the mart × date pairs step 1 just wrote, fills them from Open-Meteo</span></li>
+    <li><span class="what">generate_report.py</span><span class="why">builds the PDF from steps 1–3 plus factory prices, emails 4 recipients</span></li>
+    <li><span class="what">git_push.py</span><span class="why">commits and pushes the data files — <b style="color:var(--red)">fails here, every night</b></span></li>
+  </ol>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <h2>Component reference</h2>
+    <p>Every module, what triggers it, and whether that trigger is actually firing.</p>
+  </div>
+
+  <div class="tscroll">
+    <table>
+      <thead>
+        <tr><th>Module</th><th>Role</th><th>Trigger</th><th>Last real run</th><th>State</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="f">martbids_scraper.py</td><td>Scrapes sold lots + animal detail</td><td class="dim">launchd 21:30 &nbsp;·&nbsp; cron 08:00</td><td class="dim">6 Aug</td><td><span class="pill p-ok">Running</span></td></tr>
+        <tr><td class="f">lsl_scraper.py</td><td>Scrapes Livestock-Live last sale</td><td class="dim">launchd 21:30</td><td class="dim">6 Aug</td><td><span class="pill p-ok">Running</span></td></tr>
+        <tr><td class="f">fetch_weather.py</td><td>Open-Meteo per mart × sale date</td><td class="dim">launchd 21:30</td><td class="dim">7 Aug 03:16</td><td><span class="pill p-ok">Running</span></td></tr>
+        <tr><td class="f">scrape_factory_prices.py</td><td>DAFM BeefPriceWatch prices</td><td class="dim">cron Mon &amp; Thu 07:00</td><td class="dim">18 Jun <span style="color:var(--gold-dp)">(manual today)</span></td><td><span class="pill p-warn">Not firing</span></td></tr>
+        <tr><td class="f">prepare_factory_prices.py</td><td>Cleans + grades factory prices</td><td class="dim">cron Mon &amp; Thu 07:30</td><td class="dim">18 Jun <span style="color:var(--gold-dp)">(manual today)</span></td><td><span class="pill p-warn">Not firing</span></td></tr>
+        <tr><td class="f">train_model.py</td><td>LightGBM + Optuna price model</td><td class="dim">nothing — manual only</td><td class="dim">17 Apr</td><td><span class="pill p-warn">Unscheduled</span></td></tr>
+        <tr><td class="f">generate_report.py</td><td>Builds and emails the daily PDF</td><td class="dim">launchd 21:30 &nbsp;·&nbsp; cron 09:00</td><td class="dim">7 Aug 03:16</td><td><span class="pill p-ok">Running</span></td></tr>
+        <tr><td class="f">git_push.py</td><td>Ships data to GitHub → Streamlit</td><td class="dim">launchd 21:30</td><td class="dim">24 Apr <span style="color:var(--red)">(last success)</span></td><td><span class="pill p-bad">Failing</span></td></tr>
+        <tr><td class="f">backup_to_gdrive.sh</td><td>rclone copy to dated Drive folder</td><td class="dim">launchd Sun 22:00 &nbsp;·&nbsp; cron 21:30</td><td class="dim">27 Jul</td><td><span class="pill p-warn">Exit 78</span></td></tr>
+        <tr><td class="f">dashboard.py</td><td>MartIndex, 6 tabs, farmer-facing</td><td class="dim">streamlit run</td><td class="dim">on demand</td><td><span class="pill p-ok">Works locally</span></td></tr>
+        <tr><td class="f">bank_dashboard.py</td><td>Lending Intelligence, 6 tabs</td><td class="dim">streamlit run</td><td class="dim">on demand</td><td><span class="pill p-ok">Works locally</span></td></tr>
+        <tr><td class="f">data_utils.py</td><td>Atomic append, Parquet, safe load</td><td class="dim">imported by 3 modules</td><td class="dim">—</td><td><span class="pill p-ok">Shared</span></td></tr>
+        <tr><td class="f">mart_coords.py</td><td>74 mart lat/lon pairs</td><td class="dim">imported by fetch_weather</td><td class="dim">—</td><td><span class="pill p-ok">Static</span></td></tr>
+        <tr><td class="f">mart_soup</td><td>Old Selenium prototype</td><td class="dim">none</td><td class="dim">24 Mar</td><td><span class="pill p-warn">Dead</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <h2>Who reads what</h2>
+    <p>
+      The join between sources happens independently inside each consumer — there is no shared
+      canonical dataset, so the same filter written two ways gives two answers.
+    </p>
+  </div>
+
+  <div class="tscroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Consumer</th>
+          <th style="text-align:center">sold_lots</th>
+          <th style="text-align:center">lsl_lots</th>
+          <th style="text-align:center">weather</th>
+          <th style="text-align:center">factory_clean</th>
+          <th style="text-align:center">model + shap</th>
+          <th>Loads via</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="f">dashboard.py</td>
+          <td style="text-align:center" class="yes">●</td><td style="text-align:center" class="yes">●</td>
+          <td style="text-align:center" class="yes">●</td><td style="text-align:center" class="yes">●</td>
+          <td style="text-align:center" class="yes">●</td>
+          <td class="dim">direct <code>read_csv</code> — no Parquet</td>
+        </tr>
+        <tr>
+          <td class="f">bank_dashboard.py</td>
+          <td style="text-align:center" class="yes">●</td><td style="text-align:center" class="yes">●</td>
+          <td style="text-align:center" class="no">○</td><td style="text-align:center" class="yes">●</td>
+          <td style="text-align:center" class="no">○</td>
+          <td class="dim"><code>load_data_safe</code> — Parquet where available</td>
+        </tr>
+        <tr>
+          <td class="f">generate_report.py</td>
+          <td style="text-align:center" class="yes">●</td><td style="text-align:center" class="no">○</td>
+          <td style="text-align:center" class="no">○</td><td style="text-align:center" class="yes">●</td>
+          <td style="text-align:center" class="no">○</td>
+          <td class="dim">direct — reads metadata but never uses it</td>
+        </tr>
+        <tr>
+          <td class="f">train_model.py</td>
+          <td style="text-align:center" class="yes">●</td><td style="text-align:center" class="yes">●</td>
+          <td style="text-align:center" class="yes">●</td><td style="text-align:center" class="no">○</td>
+          <td style="text-align:center" class="dim">writes</td>
+          <td class="dim">direct — factory prices are not a feature</td>
+        </tr>
+        <tr>
+          <td class="f">git_push.py</td>
+          <td style="text-align:center" class="yes">●</td><td style="text-align:center" class="yes">●</td>
+          <td style="text-align:center" class="yes">●</td>
+          <td style="text-align:center"><span style="color:var(--red);font-weight:700">✕</span></td>
+          <td style="text-align:center" class="yes">●</td>
+          <td class="dim">explicit 8-file list — factory prices missing</td>
+        </tr>
+        <tr>
+          <td class="f">backup_to_gdrive.sh</td>
+          <td style="text-align:center" class="yes">●</td><td style="text-align:center" class="no">○</td>
+          <td style="text-align:center" class="yes">●</td><td style="text-align:center" class="yes">●</td>
+          <td style="text-align:center" class="yes">●</td>
+          <td class="dim">11-file list — <code>lsl_lots.csv</code> not backed up</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <h2>What needs fixing</h2>
+    <p>Ranked by what it costs you today. The first two are why the platform looks stale from outside.</p>
+  </div>
+
+  <div class="findings">
+
+    <div class="finding sv-crit">
+      <div class="top"><h3>Nothing has reached GitHub since 24 April</h3><span class="sev">Critical</span></div>
+      <p>
+        <code>git_push.py</code> commits successfully then fails on push with
+        <code>Invalid username or token. Password authentication is not supported</code> — every
+        night, silently, because the launcher logs the failure and moves on. 89 commits are queued
+        locally and Streamlit Cloud has been serving 24 April data for 105 days. Two token files
+        exist and their contents differ; the one <code>git_push.py</code> reads lives at
+        <code>~/Library/Scripts/MartBids/.github_token</code>, not the one in the repo.
+      </p>
+      <p class="fix"><b>Fix →</b> Mint a fresh fine-grained PAT (the current one is a legacy <code>ghp_</code> classic token), write it to the <code>~/Library</code> path, delete the stale repo copy, then push the backlog. Consider having the launcher surface a failure rather than swallow it.</p>
+    </div>
+
+    <div class="finding sv-crit">
+      <div class="top"><h3>The factory pipeline is scheduled where it cannot run</h3><span class="sev">Critical</span></div>
+      <p>
+        Both factory jobs are cron entries at 07:00 and 07:30 on Mondays and Thursdays. Cron does not
+        replay missed runs, and this Mac is usually asleep at 7am — so they last fired on 18 June.
+        Last night&rsquo;s report carried the warning <em>&ldquo;factory price data 19 days
+        old&rdquo;</em> for exactly this reason.
+      </p>
+      <p class="fix"><b>Fix →</b> Move both scripts into the 21:30 <code>run_scraper.sh</code> chain, which launchd does replay on wake. Then delete the five crontab entries — every one of them duplicates something launchd already handles.</p>
+    </div>
+
+    <div class="finding sv-high">
+      <div class="top"><h3>Factory prices would still not deploy after a token fix</h3><span class="sev">High</span></div>
+      <p>
+        <code>git_push.py</code> stages an explicit list of eight files and
+        <code>factory_prices_clean.csv</code> is not among them — even though it is git-tracked and
+        both dashboards read it. The factory tab on a restored Streamlit deployment would stay frozen
+        at whatever was last committed by hand.
+      </p>
+      <p class="fix"><b>Fix →</b> Add <code>factory_prices_clean.csv</code> to the list in <code>git_push.py</code>, and to <code>run_scraper.sh</code>&rsquo;s inline copy while you are there.</p>
+    </div>
+
+    <div class="finding sv-high">
+      <div class="top"><h3>All 50,947 Livestock-Live lots are labelled &ldquo;LSL Auctions&rdquo;</h3><span class="sev">High</span></div>
+      <p>
+        <code>get_mart_name()</code> reads the page&rsquo;s <code>&lt;h1&gt;</code>, which on
+        livestock-live.com is the site name rather than the mart&rsquo;s. Every row from 18 distinct
+        marts collapses to one label. The consequences are quiet but real: those lots map to region
+        <em>Other</em> in <code>bank_dashboard.py</code>, so 21% of the combined dataset sits outside
+        every provincial breakdown; they never match the weather join; and the model sees them as a
+        single <code>mart</code> category.
+      </p>
+      <p class="fix"><b>Fix →</b> The real identity is already captured in <code>mart_code</code> (M262, CORRIN, CAHIR …). Map code → name and backfill the existing rows — no re-scrape needed.</p>
+    </div>
+
+    <div class="finding sv-med">
+      <div class="top"><h3>The price model is 112 days old</h3><span class="sev">Medium</span></div>
+      <p>
+        <code>cattle_model.pkl</code> was trained on 17 April against 54,447 lots. There are now
+        241,519 — 4.4× the training set, across a season the model has never seen. Test MAE was
+        €0.44/kg at the time; nothing has measured it since, and nothing schedules a retrain.
+      </p>
+      <p class="fix"><b>Fix →</b> Add <code>train_model.py</code> to the chain on a weekly cadence, and write each run&rsquo;s metrics to a history file so drift is visible rather than inferred.</p>
+    </div>
+
+    <div class="finding sv-med">
+      <div class="top"><h3>Two schedulers, two diverged copies of the same script</h3><span class="sev">Medium</span></div>
+      <p>
+        crontab and launchd both define this pipeline, and <code>run_scraper.sh</code> exists twice —
+        once in the repo, once in <code>~/Library/Scripts/MartBids/</code>. Only the
+        <code>~/Library</code> copy runs. They have drifted apart: the repo copy still does an inline
+        <code>git push</code> reading a token path that no longer holds the live token, so anyone
+        running the repo version gets a different and more confusing failure.
+      </p>
+      <p class="fix"><b>Fix →</b> Keep launchd, drop cron. Make the <code>~/Library</code> file a one-line shim that calls the repo script, so there is a single source of truth under version control.</p>
+    </div>
+
+    <div class="finding sv-med">
+      <div class="top"><h3>MartBids credentials are committed in plaintext</h3><span class="sev">Medium</span></div>
+      <p>
+        <code>martbids_scraper.py</code> carries the account email and password as literals at the top
+        of the file. The file is git-tracked and has been pushed to GitHub. <code>.gitignore</code>
+        correctly excludes <code>email_config.json</code> and <code>.github_token</code> — this one
+        was simply missed.
+      </p>
+      <p class="fix"><b>Fix →</b> Move to environment variables or a gitignored config, rotate the MartBids password, and treat the credential as exposed in history regardless of the repo&rsquo;s visibility.</p>
+    </div>
+
+    <div class="finding sv-low">
+      <div class="top"><h3>The weekly Drive backup is erroring</h3><span class="sev">Low</span></div>
+      <p>
+        <code>launchctl list</code> reports exit status 78 for
+        <code>com.johnscanlan.martbids.backup</code>, and <code>backup.log</code> last wrote on
+        27 July. Separately, the backup file list includes <code>sold_lots.csv</code> but not
+        <code>lsl_lots.csv</code> — 50,947 lots that exist in no backup at all.
+      </p>
+      <p class="fix"><b>Fix →</b> Run the script by hand to surface the real error (78 is usually a config or path problem), and add <code>lsl_lots.csv</code> to the list.</p>
+    </div>
+
+    <div class="finding sv-low">
+      <div class="top"><h3>Dead code and leftovers</h3><span class="sev">Low</span></div>
+      <p>
+        In <code>generate_report.py</code>, <code>page5_ml_metrics()</code> and
+        <code>page2_breed_weight_table()</code> are defined but never called; <code>meta</code> is
+        loaded in <code>main()</code> and never used; and the docstring advertises five pages while
+        <code>main()</code> builds four. Elsewhere: <code>mart_soup</code> is an abandoned Selenium
+        prototype, <code>MartIndex/</code> and <code>Meetings - Notes/</code> are empty, and
+        <code>com.johnscanlan.martbids.test.plist</code> still points at
+        <code>/tmp/test_launchd.sh</code>.
+      </p>
+      <p class="fix"><b>Fix →</b> Either wire the ML-metrics page back into the report — the model deserves a visible scorecard — or delete it and correct the docstring.</p>
+    </div>
+
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<section>
+  <div class="sec-head">
+    <h2>What is genuinely solid</h2>
+    <p>Worth stating plainly, because the findings list above reads harsher than the system deserves.</p>
+  </div>
+  <div class="prose">
+    <p style="color:var(--muted);font-size:15px">
+      The write path is careful in a way most side projects are not. Every append goes through
+      <code>data_utils.safe_append_csv</code>: build the combined frame, write to a temp file in the
+      same directory, re-read it, verify the row count matches, and only then atomically rename. A
+      crash mid-write leaves the original file untouched. The Parquet conversion does the same, and
+      the Drive backup writes to a dated folder so no previous day is ever overwritten. That is why
+      241,519 lots collected over five months have no corruption in them.
+    </p>
+    <p style="color:var(--muted);font-size:15px">
+      The de-duplication keys are well chosen too — <code>val_code</code> for lots, a five-part
+      composite for factory prices — so re-running any scraper is free and safe, which is exactly the
+      property you want when a schedule is unreliable. Today&rsquo;s manual factory run added 13,233
+      genuinely new rows and re-derived cleanly, with no special handling required.
+    </p>
+  </div>
+</section>
+
+</div>

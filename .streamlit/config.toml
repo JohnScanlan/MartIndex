@@ -1,0 +1,10 @@
+# Streamlit's default accent is salmon (#FF4B4B) — it clashes with the
+# navy/gold scheme and lands at 2.75:1 behind the slider and multiselect
+# labels. Setting it here fixes every widget at source, in both dashboards,
+# rather than chasing each one with a CSS override.
+[theme]
+primaryColor            = "#C9A84C"   # gold — the accent, and it reads on the navy sidebar
+backgroundColor         = "#F8F6F0"   # cream page ground
+secondaryBackgroundColor = "#FFFFFF"  # cards, inputs
+textColor               = "#1B2A4A"   # navy ink — 13.2:1 on cream
+font                    = "sans serif"

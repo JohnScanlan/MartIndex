@@ -1,0 +1,248 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0; background: #FFFFFF;
+    font-family: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  .sheet { width: 1240px; background: #FFFFFF; padding: 30px 30px 26px; }
+  .hd { display: flex; flex-direction: column; gap: 4px; margin-bottom: 20px; }
+  .hd .kick {
+    font-size: 11px; font-weight: 700; letter-spacing: .15em;
+    text-transform: uppercase; color: #8895AC;
+  }
+  .hd h2 {
+    margin: 0; font-family: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-size: 27px; font-weight: 600; color: #16233F; letter-spacing: -.01em;
+  }
+  .hd p { margin: 2px 0 0; font-size: 14px; color: #5E6B85; max-width: 96ch; line-height: 1.5; }
+  .ft {
+    margin-top: 16px; padding-top: 12px; border-top: 1px solid #E8EAEF;
+    font-size: 11.5px; color: #8895AC; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  svg { display: block; width: 100%; height: auto; }
+
+  .bx      { fill:#FFFFFF; stroke:#DCDFE6; stroke-width:1.5; }
+  .bx-src  { fill:#EDEDE8; stroke:#2C3E60; stroke-width:1.5; }
+  .bx-out  { fill:#FBF6E8; stroke:#C9A84C; stroke-width:1.5; }
+  .plate   { fill:none; stroke:#C9A84C; stroke-width:1.5; stroke-dasharray:5 4; }
+
+  .t-ttl { font-family: ui-monospace,"SF Mono",Menlo,monospace; font-size:13px; font-weight:600; fill:#16233F; }
+  .t-sub { font-size:11.5px; fill:#5E6B85; }
+  .t-num { font-family: ui-monospace,"SF Mono",Menlo,monospace; font-size:11.5px; fill:#9A7C24; font-weight:600; }
+  .t-band{ font-size:10.5px; font-weight:700; letter-spacing:.14em; fill:#8895AC; }
+  .t-edge{ font-size:10.5px; fill:#8895AC; }
+  .ln    { stroke:#2C3E60; stroke-width:1.5; fill:none; }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════ SHEET 1 — DATA IN ═══════════════ -->
+<div class="sheet" id="sheet-in">
+  <div class="hd">
+    <div class="kick">MartIndex &middot; data in</div>
+    <h2>Where the data comes from</h2>
+    <p>Four independent lanes: one source, one collector script, one file. Two derive steps produce the cleaned factory prices and the price model. All steps run nightly at 21:30 via launchd, in the order numbered below.</p>
+  </div>
+
+  <svg viewBox="0 0 1180 600" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#2C3E60"/>
+      </marker>
+    </defs>
+
+    <rect class="plate" x="26" y="292" width="1128" height="264" rx="5"/>
+    <text class="t-band" x="44" y="540" style="letter-spacing:.1em">LOCAL FILESYSTEM &nbsp;·&nbsp; /Documents/Kaggle/grass &nbsp;·&nbsp; flat CSV + Parquet, no database</text>
+
+    <!-- sources -->
+    <text class="t-band" x="58" y="56">EXTERNAL SOURCES</text>
+    <rect class="bx-src" x="58"  y="70" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="74" y="97">martbids.ie</text>
+    <text class="t-sub" x="74" y="116">REST API &middot; token auth</text>
+
+    <rect class="bx-src" x="330" y="70" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="346" y="97">livestock-live.com</text>
+    <text class="t-sub" x="346" y="116">public HTML &middot; no auth</text>
+
+    <rect class="bx-src" x="602" y="70" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="618" y="97">Open-Meteo</text>
+    <text class="t-sub" x="618" y="116">archive API &middot; free, no key</text>
+
+    <rect class="bx-src" x="874" y="70" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="890" y="97">DAFM BeefPriceWatch</text>
+    <text class="t-sub" x="890" y="116">REST API &middot; 28 plants</text>
+
+    <!-- collect -->
+    <text class="t-band" x="58" y="178">COLLECT</text>
+    <path class="ln" d="M182,134 V186" marker-end="url(#a1)"/>
+    <path class="ln" d="M454,134 V186" marker-end="url(#a1)"/>
+    <path class="ln" d="M726,134 V186" marker-end="url(#a1)"/>
+    <path class="ln" d="M998,134 V186" marker-end="url(#a1)"/>
+    <text class="t-edge" x="192"  y="166">POST &middot; 8 threads</text>
+    <text class="t-edge" x="464"  y="166">GET &middot; 4 threads, backoff</text>
+    <text class="t-edge" x="736"  y="166">GET &middot; batched by mart</text>
+    <text class="t-edge" x="1008" y="166">GET &middot; 3-week window</text>
+
+    <rect class="bx" x="58"  y="192" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="74" y="218">martbids_scraper.py</text>
+    <text class="t-sub" x="74" y="237">step 1 &middot; animal detail + ICBF</text>
+
+    <rect class="bx" x="330" y="192" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="346" y="218">lsl_scraper.py</text>
+    <text class="t-sub" x="346" y="237">step 2 &middot; names from locations page</text>
+
+    <rect class="bx" x="602" y="192" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="618" y="218">fetch_weather.py</text>
+    <text class="t-sub" x="618" y="237">step 3 &middot; needs steps 1 + 2 first</text>
+
+    <rect class="bx" x="874" y="192" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="890" y="218">scrape_factory_prices.py</text>
+    <text class="t-sub" x="890" y="237">step 4 &middot; headline + grade grid</text>
+
+    <!-- store -->
+    <text class="t-band" x="58" y="306">RAW FILES</text>
+    <path class="ln" d="M182,256 V308" marker-end="url(#a1)"/>
+    <path class="ln" d="M454,256 V308" marker-end="url(#a1)"/>
+    <path class="ln" d="M726,256 V308" marker-end="url(#a1)"/>
+    <path class="ln" d="M998,256 V308" marker-end="url(#a1)"/>
+    <text class="t-edge" x="192"  y="276">append &middot; dedup val_code</text>
+    <text class="t-edge" x="464"  y="276">append &middot; dedup val_code</text>
+    <text class="t-edge" x="736"  y="276">append &middot; dedup mart × date</text>
+    <text class="t-edge" x="1008" y="276">append &middot; dedup 5-key</text>
+
+    <rect class="bx" x="58"  y="314" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="74" y="340">sold_lots.csv</text>
+    <text class="t-num" x="74" y="360">190,572 lots &middot; 38 marts</text>
+
+    <rect class="bx" x="330" y="314" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="346" y="340">lsl_lots.csv</text>
+    <text class="t-num" x="346" y="360">51,184 lots &middot; 18 marts</text>
+
+    <rect class="bx" x="602" y="314" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="618" y="340">weather_cache.csv</text>
+    <text class="t-num" x="618" y="360">1,259 mart-days &middot; 56 marts</text>
+
+    <rect class="bx" x="874" y="314" width="248" height="64" rx="3"/>
+    <text class="t-ttl" x="890" y="340">factory_prices.csv</text>
+    <text class="t-num" x="890" y="360">197,052 rows</text>
+
+    <!-- derive -->
+    <text class="t-band" x="58" y="428">DERIVE</text>
+    <path class="ln" d="M182,378 V404 H442"/>
+    <path class="ln" d="M726,378 V404 H466"/>
+    <path class="ln" d="M454,378 V430" marker-end="url(#a1)"/>
+    <path class="ln" d="M998,378 V430" marker-end="url(#a1)"/>
+
+    <rect class="bx" x="330" y="436" width="248" height="80" rx="3"/>
+    <text class="t-ttl" x="346" y="462">train_model.py</text>
+    <text class="t-sub" x="346" y="480">LightGBM + Optuna → €/kg</text>
+    <text class="t-sub" x="346" y="499">manual only &middot; not scheduled</text>
+
+    <rect class="bx" x="874" y="436" width="248" height="80" rx="3"/>
+    <text class="t-ttl" x="890" y="462">prepare_factory_prices.py</text>
+    <text class="t-sub" x="890" y="480">step 5 &middot; grade split, sanity filter</text>
+    <text class="t-num" x="890" y="499">→ 197,006 rows cleaned</text>
+  </svg>
+
+  <div class="ft">run_scraper.sh &nbsp;·&nbsp; launchd com.johnscanlan.martbids, daily 21:30 &nbsp;·&nbsp; log /tmp/martbids_run.log</div>
+</div>
+
+<!-- ═══════════════ SHEET 2 — DATA OUT ═══════════════ -->
+<div class="sheet" id="sheet-out">
+  <div class="hd">
+    <div class="kick">MartIndex &middot; data out</div>
+    <h2>Where the data goes</h2>
+    <p>Five scripts read the same folder from disk on each run. The two dashboards are served both locally and, via GitHub, on Streamlit Cloud.</p>
+  </div>
+
+  <svg viewBox="0 0 1180 600" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#2C3E60"/>
+      </marker>
+    </defs>
+
+    <rect class="plate" x="26" y="34" width="1128" height="62" rx="5"/>
+    <text class="t-ttl" x="44" y="62">sold_lots &nbsp;·&nbsp; lsl_lots &nbsp;·&nbsp; weather_cache &nbsp;·&nbsp; factory_prices_clean &nbsp;·&nbsp; cattle_model &nbsp;·&nbsp; shap</text>
+    <text class="t-sub" x="44" y="82">the shared local folder — re-read from disk by every script below</text>
+
+    <text class="t-band" x="40" y="158">SCRIPTS</text>
+    <path class="ln" d="M140,96  V170" marker-end="url(#a2)"/>
+    <path class="ln" d="M365,96  V170" marker-end="url(#a2)"/>
+    <path class="ln" d="M590,96  V170" marker-end="url(#a2)"/>
+    <path class="ln" d="M815,96  V170" marker-end="url(#a2)"/>
+    <path class="ln" d="M1040,96 V170" marker-end="url(#a2)"/>
+
+    <rect class="bx" x="40" y="176" width="200" height="86" rx="3"/>
+    <text class="t-ttl" x="54" y="202">dashboard.py</text>
+    <text class="t-sub" x="54" y="221">MartIndex &middot; 6 tabs</text>
+    <text class="t-sub" x="54" y="240">farmer-facing</text>
+    <text class="t-sub" x="54" y="256">on demand</text>
+
+    <rect class="bx" x="265" y="176" width="200" height="86" rx="3"/>
+    <text class="t-ttl" x="279" y="202">bank_dashboard.py</text>
+    <text class="t-sub" x="279" y="221">Lending &middot; 6 tabs</text>
+    <text class="t-sub" x="279" y="240">lender-facing</text>
+    <text class="t-sub" x="279" y="256">on demand</text>
+
+    <rect class="bx" x="490" y="176" width="200" height="86" rx="3"/>
+    <text class="t-ttl" x="504" y="202">generate_report.py</text>
+    <text class="t-sub" x="504" y="221">4-page PDF + charts</text>
+    <text class="t-sub" x="504" y="240">step 6</text>
+    <text class="t-sub" x="504" y="256">nightly</text>
+
+    <rect class="bx" x="715" y="176" width="200" height="86" rx="3"/>
+    <text class="t-ttl" x="729" y="202">git_push.py</text>
+    <text class="t-sub" x="729" y="221">commits 9 data files</text>
+    <text class="t-sub" x="729" y="240">step 7</text>
+    <text class="t-sub" x="729" y="256">nightly</text>
+
+    <rect class="bx" x="940" y="176" width="200" height="86" rx="3"/>
+    <text class="t-ttl" x="954" y="202">backup_to_gdrive.sh</text>
+    <text class="t-sub" x="954" y="221">rclone &middot; 12 files</text>
+    <text class="t-sub" x="954" y="240">dated folders</text>
+    <text class="t-sub" x="954" y="256">Sundays 22:00</text>
+
+    <text class="t-band" x="40" y="336">OUTPUTS</text>
+    <path class="ln" d="M140,262  V348" marker-end="url(#a2)"/>
+    <path class="ln" d="M365,262  V348" marker-end="url(#a2)"/>
+    <path class="ln" d="M590,262  V348" marker-end="url(#a2)"/>
+    <path class="ln" d="M815,262  V348" marker-end="url(#a2)"/>
+    <path class="ln" d="M1040,262 V348" marker-end="url(#a2)"/>
+    <text class="t-edge" x="600" y="316">SMTP &middot; Gmail SSL</text>
+    <text class="t-edge" x="825" y="316">HTTPS &middot; PAT</text>
+
+    <rect class="bx-out" x="40" y="354" width="425" height="72" rx="3"/>
+    <text class="t-ttl" x="54" y="382">streamlit run — on this Mac</text>
+    <text class="t-sub" x="54" y="402">both dashboards, reading today&rsquo;s files directly</text>
+
+    <rect class="bx-out" x="490" y="354" width="200" height="72" rx="3"/>
+    <text class="t-ttl" x="504" y="382">daily_report.pdf</text>
+    <text class="t-sub" x="504" y="402">emailed to 4 people</text>
+
+    <rect class="bx-out" x="715" y="354" width="200" height="72" rx="3"/>
+    <text class="t-ttl" x="729" y="382">GitHub · MartIndex</text>
+    <text class="t-sub" x="729" y="402">data + app code</text>
+
+    <rect class="bx-out" x="940" y="354" width="200" height="72" rx="3"/>
+    <text class="t-ttl" x="954" y="382">Google Drive</text>
+    <text class="t-sub" x="954" y="402">MartBids/backups/&lt;date&gt;</text>
+
+    <path class="ln" d="M815,426 V492" marker-end="url(#a2)"/>
+    <text class="t-edge" x="828" y="464">auto-deploy</text>
+
+    <rect class="bx-out" x="715" y="498" width="200" height="72" rx="3"/>
+    <text class="t-ttl" x="729" y="526">Streamlit Cloud</text>
+    <text class="t-sub" x="729" y="546">runs both dashboards</text>
+
+  </svg>
+
+  <div class="ft">steps 6–7 run inside run_scraper.sh &nbsp;·&nbsp; backup is a separate launchd job</div>
+</div>
+
+</body>
+</html>

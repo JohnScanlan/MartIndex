@@ -1,6 +1,13 @@
 """
-Latitude/longitude coordinates for Irish cattle marts on MartBids.
-Used by fetch_weather.py to pull Open-Meteo weather data.
+Static reference data for Irish cattle marts.
+
+MART_COORDS      — lat/lon per mart, used by fetch_weather.py for Open-Meteo.
+LSL_MART_COORDS  — the same for Livestock-Live marts (different naming).
+LSL_MART_REGIONS — province per Livestock-Live mart.
+ALL_MART_COORDS  — both coordinate sets merged.
+
+Coordinates are town-centre approximations. Open-Meteo's archive grid is
+~10 km, so sub-kilometre precision buys nothing here.
 """
 
 MART_COORDS = {
@@ -73,3 +80,52 @@ MART_COORDS = {
     "Ballymahon LWFM":   (53.5596, -7.7615),
     "Templemore":        (52.7961, -7.8336),
 }
+
+
+# ── Livestock-Live marts ──────────────────────────────────────────────────────
+# These carry their own naming ("Gortatlea Mart", not "Gortatlea"), so they
+# need their own lookups rather than reusing MART_COORDS above.
+
+LSL_MART_COORDS = {
+    "Gortatlea Mart":           (52.2167,  -9.6167),   # Co. Kerry
+    "Carnaross Mart":           (53.7333,  -6.9000),   # Co. Meath
+    "Ballinakill Mart":         (52.8778,  -7.3086),   # Co. Laois
+    "Cootehill Livestock Mart": (54.0731,  -7.0826),   # Co. Cavan
+    "Carnew Mart":              (52.7029,  -6.4957),   # Co. Wicklow
+    "ManorHamilton Mart":       (54.3078,  -8.1771),   # Co. Leitrim
+    "Tullamore Mart":           (53.2742,  -7.4879),   # Co. Offaly
+    "Corrin Mart (Cork Marts)": (52.1323,  -8.6821),   # Fermoy, Co. Cork
+    "Cahir Mart (Cork Marts)":  (52.3765,  -7.9235),   # Co. Tipperary
+    "Waterford Ross Mart":      (52.2593,  -7.1101),   # Co. Waterford
+    "Castleisland Co-op Mart":  (52.2337,  -9.4617),   # Co. Kerry
+    "Kilmallock Mart":          (52.3994,  -8.5744),   # Co. Limerick
+    "Delvin Mart":              (53.6117,  -7.0919),   # Co. Westmeath
+    "Newport Mart":             (52.7089,  -8.4053),   # Co. Tipperary
+    "Abbeyfeale Mart":          (52.3897,  -9.3033),   # Co. Limerick
+    "Sixmilebridge Mart":       (52.7433,  -8.7772),   # Co. Clare
+    "Listowel Mart":            (52.4469,  -9.4844),   # Co. Kerry
+    "Dingle Mart":              (52.1409, -10.2686),   # Co. Kerry
+}
+
+LSL_MART_REGIONS = {
+    "Gortatlea Mart":           "Munster",
+    "Carnaross Mart":           "Leinster",
+    "Ballinakill Mart":         "Leinster",
+    "Cootehill Livestock Mart": "Ulster",
+    "Carnew Mart":              "Leinster",
+    "ManorHamilton Mart":       "Connacht",
+    "Tullamore Mart":           "Leinster",
+    "Corrin Mart (Cork Marts)": "Munster",
+    "Cahir Mart (Cork Marts)":  "Munster",
+    "Waterford Ross Mart":      "Munster",
+    "Castleisland Co-op Mart":  "Munster",
+    "Kilmallock Mart":          "Munster",
+    "Delvin Mart":              "Leinster",
+    "Newport Mart":             "Munster",
+    "Abbeyfeale Mart":          "Munster",
+    "Sixmilebridge Mart":       "Munster",
+    "Listowel Mart":            "Munster",
+    "Dingle Mart":              "Munster",
+}
+
+ALL_MART_COORDS = {**MART_COORDS, **LSL_MART_COORDS}

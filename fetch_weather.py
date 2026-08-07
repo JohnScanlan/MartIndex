@@ -12,11 +12,12 @@ import time
 import requests
 import pandas as pd
 from pathlib import Path
-from mart_coords import MART_COORDS
+from mart_coords import ALL_MART_COORDS
 from data_utils import safe_append_csv
 
 DIR           = Path(__file__).parent
 LOTS_CSV      = DIR / "sold_lots.csv"
+LSL_CSV       = DIR / "lsl_lots.csv"
 WEATHER_CSV   = DIR / "weather_cache.csv"
 WEATHER_COLS  = ["mart", "date", "temp_max_c", "temp_min_c",
                  "precipitation_mm", "wind_speed_kmh"]
@@ -25,11 +26,11 @@ ARCHIVE_URL   = "https://archive-api.open-meteo.com/v1/archive"
 
 def fetch_weather_for_mart(mart: str, dates: list[str]) -> list[dict]:
     """Fetch daily weather for a mart over a list of dates (YYYY-MM-DD strings)."""
-    if mart not in MART_COORDS:
+    if mart not in ALL_MART_COORDS:
         print(f"  [WARN] No coords for mart '{mart}', skipping.")
         return []
 
-    lat, lon = MART_COORDS[mart]
+    lat, lon = ALL_MART_COORDS[mart]
     start = min(dates)
     end   = max(dates)
 
@@ -71,9 +72,18 @@ def main():
         print(f"No sold_lots.csv found at {LOTS_CSV}")
         return
 
-    df = pd.read_csv(LOTS_CSV, usecols=["mart", "scraped_date"])
-    df["date"] = pd.to_datetime(df["scraped_date"], errors="coerce").dt.strftime("%Y-%m-%d")
-    df = df.dropna(subset=["date"])
+    # MartBids — the sale date is the scrape date
+    mb = pd.read_csv(LOTS_CSV, usecols=["mart", "scraped_date"])
+    mb["date"] = pd.to_datetime(mb["scraped_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    frames = [mb[["mart", "date"]]]
+
+    # Livestock-Live — carries a real sale_date, and its own mart naming
+    if LSL_CSV.exists():
+        lsl = pd.read_csv(LSL_CSV, usecols=["mart", "sale_date"])
+        lsl["date"] = pd.to_datetime(lsl["sale_date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        frames.append(lsl[["mart", "date"]])
+
+    df = pd.concat(frames, ignore_index=True).dropna(subset=["date"])
 
     # Load existing cache
     if WEATHER_CSV.exists():

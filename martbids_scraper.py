@@ -17,6 +17,7 @@ Output: sold_lots.csv
 
 import csv
 import json
+import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -26,8 +27,37 @@ from pathlib import Path
 import requests
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-EMAIL    = "johnscanlan52@yahoo.ie"
-PASSWORD = "HaroldsCross1!"
+CONFIG_FILE = Path(__file__).parent / "martbids_config.json"
+
+
+def load_credentials() -> tuple[str, str]:
+    """
+    MartBids login, from $MARTBIDS_EMAIL / $MARTBIDS_PASSWORD, else from
+    martbids_config.json ({"email": "...", "password": "..."}).
+
+    The config file is gitignored. Never put these back in this file — it is
+    tracked and pushed to a GitHub repo.
+    """
+    email = os.environ.get("MARTBIDS_EMAIL", "").strip()
+    pwd   = os.environ.get("MARTBIDS_PASSWORD", "").strip()
+    if email and pwd:
+        return email, pwd
+
+    try:
+        cfg = json.loads(CONFIG_FILE.read_text())
+        email, pwd = cfg.get("email", "").strip(), cfg.get("password", "").strip()
+        if email and pwd:
+            return email, pwd
+    except FileNotFoundError:
+        pass
+    except (ValueError, OSError) as exc:
+        raise SystemExit(f"[martbids] Could not read {CONFIG_FILE.name}: {exc}")
+
+    raise SystemExit(
+        f"[martbids] No credentials. Set $MARTBIDS_EMAIL and $MARTBIDS_PASSWORD, "
+        f'or create {CONFIG_FILE.name} as {{"email": "...", "password": "..."}}'
+    )
+
 
 API_BASE  = "https://bidding.martbids.ie/martbidding/v1"
 LOGIN_URL = f"{API_BASE}/receiverapp-v5.php"
@@ -93,10 +123,11 @@ ICBF_FIELD_MAP = {
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 def login() -> tuple[str, str]:
+    email, password = load_credentials()
     resp = _post(LOGIN_URL, {
         "Task": "FULLChkLogin",
-        "email": EMAIL,
-        "password": PASSWORD,
+        "email": email,
+        "password": password,
     }, token=None)
     return resp["token"], str(resp["userid"])
 

@@ -20,8 +20,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import shap
 import streamlit as st
-from sklearn.linear_model import LinearRegression
-from scipy.optimize import curve_fit
+import viz_theme as vz
+import agri_credit as ac
 
 warnings.filterwarnings("ignore")
 
@@ -40,14 +40,16 @@ FB_BLUE   = "#1B2A4A"   # primary navy
 FB_DARK   = "#1B2A4A"   # text / headings
 FB_BG     = "#F4F5F7"   # page background
 FB_CARD   = "#FFFFFF"   # card / panel background
-FB_GREY   = "#6B7280"   # muted text
+FB_GREY   = "#5B6573"   # muted text — #6B7280 was 4.43:1 on the page ground
 FB_GREEN  = "#276749"   # positive / success
 FB_RED    = "#9B2335"   # negative / alert
 FB_BORDER = "#DDE1E7"   # borders
 GOLD      = "#C9A84C"   # accent gold
 
-PALETTE = [FB_BLUE, GOLD, FB_GREEN, FB_RED, "#4B5EA6",
-           "#7C6A3A", "#5B8A6A", "#8B3A4A", "#2E4A7A", "#A08030"]
+# Validated categorical set — see viz_theme. The previous list cycled
+# near-duplicate hues (two navies, two olives, two greens) and was unreadable
+# past three series.
+PALETTE = vz.PALETTE
 
 st.markdown(f"""
 <style>
@@ -249,6 +251,21 @@ st.markdown(f"""
 
     /* ── Alert boxes ─────────────────────────────────────────────────────── */
     div[data-testid="stAlert"] {{ border-radius: 8px; }}
+    /* Streamlit's alert text colours assume its own tinted ground. When that
+       tint doesn't paint, the success green lands at 4.5:1 on the page — right
+       on the AA boundary. Paint the tint and the ink explicitly so neither
+       depends on Streamlit's theme. */
+    div[data-testid="stAlert"] p,
+    div[data-testid="stAlert"] li,
+    div[data-testid="stAlert"] span {{ color: {FB_DARK} !important; }}
+    div[data-testid="stAlert"]:has([data-testid="stAlertContentSuccess"]) {{
+        background-color: #E7F0E9 !important; }}
+    div[data-testid="stAlert"]:has([data-testid="stAlertContentInfo"]) {{
+        background-color: #E8EDF5 !important; }}
+    div[data-testid="stAlert"]:has([data-testid="stAlertContentWarning"]) {{
+        background-color: #F7EFE1 !important; }}
+    div[data-testid="stAlert"]:has([data-testid="stAlertContentError"]) {{
+        background-color: #F6E5E7 !important; }}
 
     /* ── Divider ─────────────────────────────────────────────────────────── */
     hr {{ border-color: {FB_BORDER} !important; margin: 1rem 0; }}
@@ -300,32 +317,25 @@ ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
 
 def _chart_layout(**kw):
-    """Common Plotly layout defaults — explicit colours so dark-mode never bleeds in."""
-    base = dict(
-        plot_bgcolor="#FFFFFF",
-        paper_bgcolor="#FFFFFF",
-        font=dict(color=FB_DARK, family="system-ui, -apple-system, sans-serif"),
-        title_font=dict(color=FB_DARK),
-    )
+    """
+    Common Plotly layout defaults. Styling comes from viz_theme's template.
+
+    Deliberately does NOT set a margin: several call sites pass their own
+    `margin=` alongside `**_chart_layout()`, and returning one here collides
+    with them (a TypeError, not a graceful fallback).
+    """
+    base = dict(template=vz.TEMPLATE)
     base.update(kw)
     return base
 
 
 def _show_chart(fig):
-    """Apply axis colours then render — use everywhere instead of st.plotly_chart."""
-    fig.update_xaxes(
-        tickfont=dict(color=FB_DARK),
-        gridcolor="#EAECEF",
-        linecolor=FB_BORDER,
-        zerolinecolor="#EAECEF",
-    )
-    fig.update_yaxes(
-        tickfont=dict(color=FB_DARK),
-        gridcolor="#EAECEF",
-        linecolor=FB_BORDER,
-        zerolinecolor="#EAECEF",
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    """
+    Render a figure. Use everywhere instead of st.plotly_chart — vz.show_chart
+    passes theme=None, without which Streamlit discards the template and every
+    axis label falls back to #808495 (3.7:1 on white).
+    """
+    vz.show_chart(fig)
 
 
 # ── Data loading ──────────────────────────────────────────────────────────────
@@ -397,8 +407,12 @@ def load_data():
     ] = np.nan
 
     # ── Shared feature engineering ─────────────────────────────────────────
-    top_breeds      = df["breed"].value_counts().head(20).index
-    df["breed_grp"] = df["breed"].where(df["breed"].isin(top_breeds), "Other")
+    # Breed vocabulary comes from the trained model, not a fresh top-20 computed
+    # here. Computing it locally let this app offer EWE (sheep) as a breed, which
+    # the model has never seen — it hit the encoder as an unknown category and
+    # was silently scored as -1.
+    df = df[~df["breed"].isin(ac.NON_CATTLE_BREEDS_UI)].copy()
+    df["breed_grp"] = ac.to_breed_group(df["breed"], ac.breed_levels(df))
     df["breed_sex"] = df["breed_grp"] + "_" + df["sex_clean"]
 
     if "dam_breed" in df.columns:
@@ -462,51 +476,11 @@ def load_weather_latest():
     return latest.set_index("mart").to_dict("index")
 
 
-@st.cache_data
-def compute_growth_model(df_hash):
-    """
-    Fit weight = a + b*sqrt(age_months) per breed_grp × sex_clean.
-    Sqrt model captures natural deceleration of growth as animals mature.
-    Returns dict: (breed, sex) → (a, b).
-    """
-    df = load_data()
-    grp = df.dropna(subset=["age_months", "weight"])
-    grp = grp[grp["age_months"] > 0]
-
-    def _fit(ages, weights):
-        try:
-            popt, _ = curve_fit(
-                lambda t, a, b: a + b * np.sqrt(t),
-                ages, weights,
-                p0=[weights.mean() - 50 * np.sqrt(ages.mean()), 50],
-                maxfev=3000,
-            )
-            return float(popt[0]), max(float(popt[1]), 1.0)
-        except Exception:
-            lr = LinearRegression().fit(ages.reshape(-1, 1), weights)
-            return float(lr.intercept_), max(float(lr.coef_[0]) * 3, 1.0)
-
-    params = {}
-    for (breed, sex), g in grp.groupby(["breed_grp", "sex_clean"]):
-        if len(g) < 15:
-            continue
-        params[(breed, sex)] = _fit(g["age_months"].values, g["weight"].values)
-
-    params[("_default", "_default")] = _fit(
-        grp["age_months"].values, grp["weight"].values
-    )
-    return params
-
-
-def project_weight(cur_weight, cur_age, months_ahead, _a, b):
-    """
-    Project weight using the sqrt growth model anchored to the animal's
-    current weight. Only the b (slope) term drives the projection — the
-    intercept is discarded so the curve passes through (cur_age, cur_weight).
-    """
-    future_age = cur_age + months_ahead
-    gain = b * (np.sqrt(max(future_age, 0.01)) - np.sqrt(max(cur_age, 0.01)))
-    return cur_weight + max(gain, 0.5 * months_ahead)
+# The sqrt growth curve that used to live here has been removed. It projected a
+# single line with no uncertainty, and it could never be validated: no animal in
+# this data is weighed twice. agri_credit.weight_trajectory() replaces it with a
+# lookup over comparable animals, which is validated (±55 kg, no bias) and
+# returns a range. See CLAUDE.md.
 
 
 # ── Sidebar filters ───────────────────────────────────────────────────────────
@@ -543,7 +517,11 @@ def sidebar_filters(df):
         df["mart"].isin(sel_marts if sel_marts else marts)
         & df["sex_clean"].isin(sel_sex if sel_sex else sexes)
         & df["weight"].between(*weight_range)
-        & df["age_months"].between(*age_range)
+        # .between() is False for NaN, which silently dropped every lot with no
+        # recorded age (4.6% overall, 13% of Livestock-Live). Only exclude them
+        # when the user has actually narrowed the slider.
+        & (df["age_months"].between(*age_range)
+           | (df["age_months"].isna() & (age_range == (min_a, max_a))))
     )
     if sel_breeds:
         mask &= df["breed"].isin(sel_breeds)
@@ -1003,7 +981,6 @@ def tab_calculator(df):
     </div>
     """, unsafe_allow_html=True)
 
-    growth_params = compute_growth_model(str(len(df)))
     model        = load_model()
     all_breeds   = sorted(df["breed_grp"].dropna().unique())
     all_dam      = sorted(df["dam_breed_grp"].dropna().unique())
@@ -1021,18 +998,40 @@ def tab_calculator(df):
     cur_age    = c3.number_input("Current Age (months)", 0, 60, 8, step=1)
     months_fwd = st.slider("Months ahead to project", 1, 24, 6)
 
-    # Resolve sqrt model params for this breed/sex
-    a, b = growth_params.get(
-        (breed_val, sex_val),
-        growth_params.get(("_default", "_default"), (-80.0, 120.0))
-    )
-
-    # Month-by-month projection
-    proj_months  = list(range(0, months_fwd + 1))
-    proj_weights = [project_weight(cur_weight, cur_age, m, a, b) for m in proj_months]
+    # Weight comes from comparable animals at each age, not from a fitted growth
+    # curve. No animal in this data is ever weighed twice, so an individual
+    # growth curve cannot be validated; the cohort lookup can, and does:
+    # ±55 kg with no bias on held-out sales. It also returns a range, which the
+    # single sqrt line could not — and that line was skewed badly at the
+    # extremes (+77 kg on light animals, -107 kg on heavy).
+    # sex_val is this app's own encoding (M/F/B), which is what df.sex_clean
+    # holds here — bank_dashboard uses Male/Female/Bull. Pass it through
+    # untranslated so it matches the frame it is being looked up against.
+    _traj = ac.weight_trajectory(df, breed_val, sex_val,
+                                 cur_age, months_ahead=months_fwd,
+                                 current_weight=cur_weight, step=1)
+    proj_months  = [int(e.age_months - cur_age) for e in _traj]
+    proj_weights = [e.kg_median for e in _traj]
+    proj_lo      = [e.kg_p25 for e in _traj]
+    proj_hi      = [e.kg_p75 for e in _traj]
     proj_ages    = [cur_age + m for m in proj_months]
+    proj_n       = [e.n for e in _traj]
     target_w     = proj_weights[-1]
     weight_gain  = target_w - cur_weight
+
+    # Irish cattle are sold on a calendar, not uniformly across ages: big peaks
+    # at 1-2 months (dairy-beef calves), 12-17 (stores) and 24-29 (finished),
+    # with real troughs at 5-8 and 19-21 where almost nothing changes hands.
+    # A projection crossing a trough rests on very few animals, so say so.
+    _thin = [(a, n) for a, n in zip(proj_ages, proj_n) if n < 150]
+    if _thin:
+        _worst = min(_thin, key=lambda x: x[1])
+        st.warning(
+            f"**Thin data across part of this range** — at {_worst[0]:.0f} months only "
+            f"{_worst[1]:,} comparable animals were sold. Irish cattle change hands on a "
+            f"calendar (calves at 1–2 months, stores at 12–17, finished at 24–29), and "
+            f"almost nothing sells at 5–8 or 19–21 months. The weight line is least "
+            f"reliable through those troughs.")
 
     # LightGBM predictions along trajectory
     val_preds, ppkg_preds = [], []
@@ -1067,10 +1066,24 @@ def tab_calculator(df):
     # ── KPI cards ─────────────────────────────────────────────────────────────
     st.divider()
     r1, r2, r3, r4 = st.columns(4)
-    r1.metric("Growth Rate (sqrt model)", f"{b:.1f} kg/√month",
-              help="Higher = faster-maturing breed from our mart data")
-    r2.metric(f"Projected Weight (+{months_fwd}m)", f"{target_w:.0f} kg",
-              delta=f"+{weight_gain:.0f} kg")
+    _adg = weight_gain / max(months_fwd * 30.44, 1)
+    r1.metric("Implied daily gain", f"{_adg:.2f} kg/day",
+              help="From comparable animals of this breed and sex at each age — "
+                   "not a fitted growth curve. Irish cattle typically run 0.4–1.4 kg/day.")
+    if not ac.adg_is_plausible(_adg):
+        _lo, _hi = ac.PLAUSIBLE_ADG
+        st.info(
+            f"**The implied gain of {_adg:.2f} kg/day sits outside the {_lo}–{_hi} kg/day "
+            f"range real cattle achieve** — treat the weight line as conservative. "
+            f"It comes from comparing animals sold at {cur_age:.0f} months against "
+            f"*different* animals sold at {cur_age + months_fwd:.0f} months, and farmers "
+            f"tend to move lighter stores on early and keep the thrivers. That selection "
+            f"flattens the curve. Nothing in this data can correct it: no animal here is "
+            f"ever weighed twice.")
+    r2.metric(f"Expected Weight (+{months_fwd}m)", f"{target_w:.0f} kg",
+              delta=f"+{weight_gain:.0f} kg",
+              help=f"Middle half of comparables: {proj_lo[-1]:.0f}–{proj_hi[-1]:.0f} kg. "
+                   f"Held-out accuracy ±55 kg, no bias.")
     if ppkg_preds:
         r3.metric("Est. €/kg at target", f"€{ppkg_preds[-1]:.2f}")
         r4.metric("Est. Value at target", f"€{val_preds[-1]:,.0f}",
@@ -1078,25 +1091,29 @@ def tab_calculator(df):
 
     st.divider()
 
-    # ── Growth chart with sqrt population curve ────────────────────────────────
+    # ── Growth chart: comparables scatter + cohort band + this animal ─────────
     comp_all = df[(df["breed_grp"] == breed_val) & (df["sex_clean"] == sex_val)] \
                  .dropna(subset=["age_months", "weight"])
     comp_all = comp_all[(comp_all["weight"] > 0) & (comp_all["age_months"] > 0)]
     fig = go.Figure()
     if len(comp_all) > 0:
-        sample = comp_all.sample(min(400, len(comp_all)), random_state=42)
+        # 400 points out of ~19,000 made dense age bands look empty.
+        sample = comp_all.sample(min(4000, len(comp_all)), random_state=42)
         fig.add_trace(go.Scatter(
             x=sample["age_months"], y=sample["weight"], mode="markers",
-            marker=dict(color="rgba(24,119,242,0.18)", size=5),
+            marker=dict(color="rgba(24,119,242,0.20)", size=3.5),
             name=f"{breed_val} {sex_val} — sold",
             hovertemplate="Age: %{x:.0f}m  Weight: %{y:.0f}kg<extra></extra>",
         ))
-        age_range = np.linspace(comp_all["age_months"].min(), comp_all["age_months"].max(), 80)
-        fig.add_trace(go.Scatter(
-            x=age_range, y=a + b * np.sqrt(age_range), mode="lines",
-            line=dict(color=FB_BLUE, width=1.5, dash="dot"),
-            name="Sqrt fit (population)",
-        ))
+    # Middle half of comparable animals at each age — the honest uncertainty.
+    fig.add_trace(go.Scatter(x=proj_ages, y=proj_hi, mode="lines",
+                             line=dict(width=0), showlegend=False, hoverinfo="skip"))
+    fig.add_trace(go.Scatter(
+        x=proj_ages, y=proj_lo, mode="lines", fill="tonexty",
+        fillcolor="rgba(39,103,73,0.15)", line=dict(width=0),
+        name="Middle half of comparables", customdata=proj_n,
+        hovertemplate="Age %{x:.0f}m: from %{y:.0f}kg "
+                      "(%{customdata:,} comparables)<extra></extra>"))
     fig.add_trace(go.Scatter(
         x=proj_ages, y=proj_weights, mode="lines+markers",
         line=dict(color=FB_GREEN, width=3), marker=dict(size=7, color=FB_GREEN),
@@ -1110,7 +1127,7 @@ def tab_calculator(df):
         marker=dict(color=FB_GREEN, size=16, symbol="star",
                     line=dict(color="white", width=2)), name=f"Target (+{months_fwd}m)"))
     fig.update_layout(
-        title=f"{breed_val} {sex_val} — Sqrt-Anchored Growth Projection",
+        title=f"{breed_val} {sex_val} — Weight by Age, from Comparable Animals",
         xaxis_title="Age (months)", yaxis_title="Weight (kg)",
         height=480, legend=dict(orientation="h", y=1.06, font=dict(color=FB_DARK)), **_chart_layout(),
     )
@@ -1609,13 +1626,26 @@ def tab_factory(fp: pd.DataFrame):
             z=pivot.values,
             x=pivot.columns.tolist(),
             y=pivot.index.tolist(),
-            colorscale=[[0, FB_RED], [0.5, "#F5F0E8"], [1, FB_GREEN]],
-            text=[[f"€{v:.2f}" if v == v else "" for v in row] for row in pivot.values],
-            texttemplate="%{text}",
+            colorscale=vz.DIV_REDGREEN,
             hovertemplate="Conf: %{y}  Fat: %{x}<br>Avg €/kg: %{z:.3f}<extra></extra>",
-            colorbar=dict(title="€/kg", tickfont=dict(color=FB_DARK),
-                          title_font=dict(color=FB_DARK)),
+            colorbar=dict(title="€/kg", tickfont=dict(color=vz.INK_SOFT),
+                          title_font=dict(color=vz.INK_SOFT)),
         ))
+
+        # Labels are annotations, not Heatmap text: Plotly allows only one
+        # textfont colour per trace, and this ramp is dark at BOTH ends with a
+        # pale middle — so no single colour stays legible across it.
+        _z = pivot.values.astype(float)
+        _lo, _hi = np.nanmin(_z), np.nanmax(_z)
+        for _yi, _conf in enumerate(pivot.index.tolist()):
+            for _xi, _fat in enumerate(pivot.columns.tolist()):
+                _v = _z[_yi, _xi]
+                if _v != _v:          # NaN
+                    continue
+                fig_hm.add_annotation(
+                    x=_fat, y=_conf, text=f"€{_v:.2f}", showarrow=False,
+                    font=dict(size=11, color=vz.diverging_cell_ink(_v, _lo, _hi)),
+                )
         fig_hm.update_layout(
             xaxis_title="Fat Class",
             yaxis_title="Conformation",

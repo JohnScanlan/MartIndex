@@ -14,15 +14,17 @@ Outputs:
 """
 
 import json
+import shutil
 import sys
 import warnings
+from datetime import datetime
 import joblib
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
 import shap
 import optuna
-from sklearn.model_selection import train_test_split, KFold, cross_val_score
+from sklearn.model_selection import GroupKFold
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.preprocessing import OrdinalEncoder
 from sklearn.pipeline import Pipeline
@@ -43,6 +45,8 @@ META_PATH     = DIR / "model_metadata.json"
 SHAP_VAL_PATH = DIR / "shap_values.pkl"
 SHAP_BG_PATH  = DIR / "shap_background.pkl"
 PARAMS_PATH   = DIR / "best_params.json"
+ARCHIVE_DIR   = DIR / "_model_archive"
+SHAP_SAMPLE   = 6000          # rows of the holdout to explain
 
 
 # ── Feature helpers ───────────────────────────────────────────────────────────
@@ -66,6 +70,9 @@ def export_score(s):
 
 TOP_BREEDS     = 20
 TOP_DAM_BREEDS = 15
+
+# Sheep codes that appear in the cattle feed (Ennis lists ewes).
+NON_CATTLE_BREEDS = {"EWE", "LB", "L1", "L2", "L3", "L4", "LAMB", "RAM", "HOG"}
 
 def load_combined() -> pd.DataFrame:
     """Stack MartBids + Livestock-Live into one DataFrame."""
@@ -121,6 +128,15 @@ def load_and_engineer(csv_path: Path = None, df: pd.DataFrame = None) -> pd.Data
     df["bvd_ok"]          = (df["bvd_tested"] == "Yes").astype(int)
     df["export_score"]    = df["export_status"].apply(export_score)
 
+    # ── Drop non-cattle ───────────────────────────────────────────────────────
+    # Some marts list sheep in the same feed. EWE lots run ~83 kg with no age
+    # and no sex, and were being priced by a cattle model as a first-class breed.
+    n_before = len(df)
+    df = df[~df["breed"].isin(NON_CATTLE_BREEDS)].copy()
+    if len(df) < n_before:
+        print(f"  Dropped {n_before - len(df):,} non-cattle lots "
+              f"({', '.join(sorted(NON_CATTLE_BREEDS))})")
+
     # ── Categorical cleaning ──────────────────────────────────────────────────
     top_breeds  = df["breed"].value_counts().head(TOP_BREEDS).index
     df["breed_grp"] = df["breed"].where(df["breed"].isin(top_breeds), "Other")
@@ -152,8 +168,24 @@ def load_and_engineer(csv_path: Path = None, df: pd.DataFrame = None) -> pd.Data
     # ── Sale date & seasonality ───────────────────────────────────────────────
     sale_dt = pd.to_datetime(df["scraped_date"], errors="coerce")
     df["sale_date"]   = sale_dt.dt.strftime("%Y-%m-%d")
+    df["sale_dt"]     = sale_dt                   # kept for the temporal split
     df["sale_month"]  = sale_dt.dt.month          # 1–12, strong seasonal signal
     df["sale_month"]  = df["sale_month"].fillna(0).astype(int)
+
+    # ── Grouping key: one auction ─────────────────────────────────────────────
+    # A single sale contains ~150 lots that clear at very similar money, and a
+    # third of MartBids rows share a base lot (35A/35B/35C) — the same pen, sold
+    # seconds apart. Splitting a sale across train and test lets the model
+    # memorise that sale's price level, which inflated the old random-split
+    # score from R² 0.70 to 0.76. Never split a sale.
+    if "sale_id" in df.columns:
+        sale_id = df["sale_id"].astype(str)
+    else:
+        sale_id = pd.Series("", index=df.index)
+    # LSL carries no sale_id, so its mart + date identifies the auction
+    sale_id = sale_id.where(sale_id.notna() & (sale_id != "") & (sale_id != "nan"),
+                            df["sale_date"].astype(str))
+    df["sale_key"] = df["mart"].astype(str) + "|" + sale_id
 
     # ── Merge weather ─────────────────────────────────────────────────────────
     if WEATHER_CSV.exists():
@@ -186,6 +218,16 @@ CATEGORICAL_FEATURES = ["breed_grp", "sex_clean", "mart", "dam_breed_grp", "bree
 
 ALL_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 TARGET       = "ppkg"
+
+# After the ColumnTransformer the columns are [numeric…, categorical…], so the
+# categoricals sit at these indices. LightGBM has to be TOLD they are
+# categorical — otherwise it reads the ordinal codes as numbers and splits on
+# ranges like `breed_grp <= 7.5`, which lumps breeds together alphabetically.
+# Measured on the temporal holdout: native categorical MAE €0.3906 vs €0.3946
+# for ordinal-as-numeric and €0.3959 for one-hot (one-hot is worse here — it
+# fragments the trees across 150 sparse columns).
+CAT_IDX = list(range(len(NUMERIC_FEATURES), len(ALL_FEATURES)))
+FIT_KW  = {"model__categorical_feature": CAT_IDX}
 
 
 # ── Default hyperparameters (conservative to avoid overfitting) ───────────────
@@ -244,8 +286,14 @@ def build_pipeline(params: dict = None):
 
 # ── Optuna hyperparameter search ──────────────────────────────────────────────
 
-def tune_hyperparams(X: pd.DataFrame, y: pd.Series, n_trials: int = 80) -> dict:
-    """Search LightGBM hyperparameters with Optuna. Returns best param dict."""
+def tune_hyperparams(X: pd.DataFrame, y: pd.Series, groups: pd.Series,
+                     n_trials: int = 80) -> dict:
+    """
+    Search LightGBM hyperparameters with Optuna. Returns best param dict.
+
+    Scored with GroupKFold on the sale key, not KFold(shuffle=True) — tuning
+    against a leaky score optimises for memorising sale price levels.
+    """
 
     def objective(trial):
         params = dict(
@@ -262,11 +310,16 @@ def tune_hyperparams(X: pd.DataFrame, y: pd.Series, n_trials: int = 80) -> dict:
             n_jobs            = -1,
             verbose           = -1,
         )
-        pipe = build_pipeline(params)
-        cv = KFold(n_splits=5, shuffle=True, random_state=42)
-        scores = cross_val_score(pipe, X, y, cv=cv,
-                                 scoring="neg_mean_absolute_error", n_jobs=-1)
-        return -scores.mean()
+        # Folds are run explicitly rather than through cross_val_score:
+        # routing a fit param (categorical_feature) through it needs sklearn's
+        # metadata routing switched on, which is easy to forget and fails loudly
+        # only when someone finally runs --tune.
+        maes = []
+        for tr_i, te_i in GroupKFold(n_splits=5).split(X, y, groups):
+            pipe = build_pipeline(params)
+            pipe.fit(X.iloc[tr_i], y.iloc[tr_i], **FIT_KW)
+            maes.append(mean_absolute_error(y.iloc[te_i], pipe.predict(X.iloc[te_i])))
+        return float(np.mean(maes))
 
     study = optuna.create_study(direction="minimize")
     study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
@@ -280,7 +333,97 @@ def tune_hyperparams(X: pd.DataFrame, y: pd.Series, n_trials: int = 80) -> dict:
     return best
 
 
+# ── Splits ────────────────────────────────────────────────────────────────────
+#
+# Two questions, two splits, both grouped so a sale never straddles the boundary:
+#
+#   temporal  — "how well does this price a week I have never seen?"  The number
+#               that matters for the underwrite tool, which projects forward.
+#   grouped   — "how well does this price an unseen sale from a period I know?"
+#               The number that matters for herd valuation, which prices today.
+#
+# The old code used a plain random split, which answers neither: every test lot
+# came from a sale that was also in training.
+
+HOLDOUT_WEEKS = 6
+
+
+def temporal_split(df: pd.DataFrame, weeks: int = HOLDOUT_WEEKS):
+    """Hold out the most recent `weeks` of trading. Whole sales only."""
+    cutoff = df["sale_dt"].max() - pd.Timedelta(weeks=weeks)
+    test = df["sale_dt"] > cutoff
+    return ~test, test, cutoff
+
+
+def grouped_split(df: pd.DataFrame, frac: float = 0.2, seed: int = 42):
+    """Random holdout of whole sales, so no sale appears on both sides."""
+    sales = df["sale_key"].unique()
+    rng = np.random.default_rng(seed)
+    rng.shuffle(sales)
+    holdout = set(sales[: max(1, int(len(sales) * frac))])
+    test = df["sale_key"].isin(holdout)
+    return ~test, test
+
+
+def rolling_origin_cv(X, y, dates, n_splits: int = 4, weeks: int = 3):
+    """
+    Expanding-window CV: train on everything before a cutoff, test on the next
+    `weeks`, walk the cutoff forward.
+
+    Replaces KFold(shuffle=True), which on time-series data trains on the future
+    to predict the past and reports a score the model cannot reproduce in use.
+    """
+    end = dates.max()
+    maes = []
+    for i in range(n_splits, 0, -1):
+        cut = end - pd.Timedelta(weeks=weeks * i)
+        tr = dates <= cut
+        te = (dates > cut) & (dates <= cut + pd.Timedelta(weeks=weeks))
+        if tr.sum() < 5000 or te.sum() < 500:
+            continue
+        pipe = build_pipeline()
+        pipe.fit(X[tr], y[tr], **FIT_KW)
+        mae = mean_absolute_error(y[te], pipe.predict(X[te]))
+        maes.append(mae)
+        print(f"    fold to {cut.date()}:  train {tr.sum():>7,}  "
+              f"test {te.sum():>6,}  MAE €{mae:.4f}")
+    return maes
+
+
 # ── Metrics ───────────────────────────────────────────────────────────────────
+
+def cohort_metrics(df_test: pd.DataFrame, y_true, y_pred, min_n: int = 100) -> dict:
+    """
+    Error broken out by cohort, so a good national average cannot hide a
+    segment the model prices badly. This is what the dashboards need in order
+    to show a confidence hint next to a prediction.
+    """
+    work = df_test.copy()
+    work["_abs_err"] = np.abs(np.asarray(y_true) - np.asarray(y_pred))
+    work["_ape"] = work["_abs_err"] / np.asarray(y_true).clip(min=0.01) * 100
+    work["_wband"] = pd.cut(work["weight"], [0, 200, 300, 400, 500, 650, 9999],
+                            labels=["<200", "200-300", "300-400",
+                                    "400-500", "500-650", ">650"], right=False)
+
+    out = {}
+    for name, keys in [("by_breed", ["breed_grp"]),
+                       ("by_sex", ["sex_clean"]),
+                       ("by_weight_band", ["_wband"]),
+                       ("by_source", ["source"]),
+                       ("by_breed_sex_weight", ["breed_grp", "sex_clean", "_wband"])]:
+        rows = {}
+        for key, g in work.groupby(keys, observed=True):
+            if len(g) < min_n:
+                continue
+            label = " · ".join(str(k) for k in key) if isinstance(key, tuple) else str(key)
+            rows[label] = {
+                "n": int(len(g)),
+                "MAE_eur_kg": round(float(g["_abs_err"].mean()), 4),
+                "MAPE_%": round(float(g["_ape"].mean()), 2),
+            }
+        out[name] = dict(sorted(rows.items(), key=lambda kv: -kv[1]["MAE_eur_kg"]))
+    return out
+
 
 def compute_metrics(y_true, y_pred, label=""):
     mae   = mean_absolute_error(y_true, y_pred)
@@ -323,36 +466,98 @@ def main():
 
     # ── Optuna tuning (optional) ───────────────────────────────────────────────
     if tune:
-        print(f"\nRunning Optuna search (80 trials)…")
-        best_params = tune_hyperparams(X, y, n_trials=80)
+        print("\nRunning Optuna search (80 trials, grouped CV)…")
+        best_params = tune_hyperparams(X, y, df["sale_key"], n_trials=80)
     else:
         best_params = None   # build_pipeline will load saved or use defaults
 
-    # ── Train / test split ────────────────────────────────────────────────────
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42)
-
-    print(f"\nTrain: {len(X_train):,}   Test: {len(X_test):,}")
+    # ── Primary split: grouped temporal ───────────────────────────────────────
+    tr_mask, te_mask, cutoff = temporal_split(df)
+    X_train, X_test = X[tr_mask], X[te_mask]
+    y_train, y_test = y[tr_mask], y[te_mask]
+    print(f"\nTemporal split — holding out the last {HOLDOUT_WEEKS} weeks "
+          f"(sales after {cutoff.date()})")
+    print(f"  Train: {len(X_train):,}   Test: {len(X_test):,}")
+    print(f"  Sales in both sides: "
+          f"{len(set(df.loc[tr_mask,'sale_key']) & set(df.loc[te_mask,'sale_key']))} "
+          f"(must be 0)")
 
     # ── Fit pipeline ──────────────────────────────────────────────────────────
     print("\nTraining LightGBM pipeline…")
     pipeline = build_pipeline(best_params)
-    pipeline.fit(X_train, y_train)
+    pipeline.fit(X_train, y_train, **FIT_KW)
 
     # ── Evaluate ──────────────────────────────────────────────────────────────
     train_metrics = compute_metrics(y_train, pipeline.predict(X_train), "Train metrics")
-    test_metrics  = compute_metrics(y_test,  pipeline.predict(X_test),  "Test metrics")
+    test_pred     = pipeline.predict(X_test)
+    test_metrics  = compute_metrics(y_test, test_pred,
+                                    f"Test metrics — TEMPORAL (last {HOLDOUT_WEEKS} wks)")
 
-    # ── 5-fold CV ─────────────────────────────────────────────────────────────
-    print("\n  Running 5-fold cross-validation…")
-    cv_scores = cross_val_score(
-        build_pipeline(), X, y,
-        cv=KFold(n_splits=5, shuffle=True, random_state=42),
-        scoring="neg_mean_absolute_error",
-        n_jobs=-1,
-    )
-    cv_mae = -cv_scores.mean()
-    print(f"    CV MAE: €{cv_mae:.4f}/kg ± €{cv_scores.std():.4f}/kg")
+    # ── Secondary split: grouped random (the "price today" regime) ────────────
+    gtr, gte = grouped_split(df)
+    g_pipe = build_pipeline(best_params)
+    g_pipe.fit(X[gtr], y[gtr], **FIT_KW)
+    grouped_metrics = compute_metrics(y[gte], g_pipe.predict(X[gte]),
+                                      "Test metrics — GROUPED RANDOM (unseen sales)")
+
+    # ── Per-cohort error ──────────────────────────────────────────────────────
+    print("\n  Worst cohorts by MAE (temporal holdout, n>=100):")
+    cohorts = cohort_metrics(df[te_mask], y_test, test_pred)
+    for label, m in list(cohorts["by_breed_sex_weight"].items())[:6]:
+        print(f"    {label:44s} n={m['n']:>5,}  MAE €{m['MAE_eur_kg']:.3f}  "
+              f"MAPE {m['MAPE_%']:.1f}%")
+    print("  Best cohorts:")
+    for label, m in list(cohorts["by_breed_sex_weight"].items())[-3:]:
+        print(f"    {label:44s} n={m['n']:>5,}  MAE €{m['MAE_eur_kg']:.3f}  "
+              f"MAPE {m['MAPE_%']:.1f}%")
+
+    # ── Rolling-origin CV ─────────────────────────────────────────────────────
+    print("\n  Rolling-origin cross-validation (expanding window):")
+    cv_maes = rolling_origin_cv(X, y, df["sale_dt"])
+    cv_mae = float(np.mean(cv_maes)) if cv_maes else float("nan")
+    cv_std = float(np.std(cv_maes)) if cv_maes else float("nan")
+    print(f"    mean MAE €{cv_mae:.4f}/kg ± €{cv_std:.4f}")
+
+    # ── Is the new model actually better? ─────────────────────────────────────
+    # Compare like-for-like: score the CURRENT live model on this same holdout.
+    # The old metadata's numbers came from a leaky random split and are not
+    # comparable to anything here.
+    # The deployed model is always refit on ALL data, so once a model has been
+    # promoted from this script it has the holdout inside its own training set.
+    # Scoring that pickle on the holdout returns an in-sample number (~€0.29 vs
+    # a true ~€0.39) and would block every future promotion forever. Only score
+    # the pickle when it genuinely predates the holdout; otherwise compare the
+    # previous run's *recorded* holdout metric, which is like-for-like.
+    incumbent_mae, incumbent_basis = None, "none"
+    prev_meta = {}
+    if META_PATH.exists():
+        try:
+            prev_meta = json.loads(META_PATH.read_text())
+        except ValueError:
+            pass
+
+    trained_through = (prev_meta.get("date_range") or [None, None])[1]
+    saw_holdout = trained_through is not None and str(trained_through) > str(cutoff.date())
+
+    if saw_holdout:
+        incumbent_mae = (prev_meta.get("test_metrics") or {}).get("MAE_eur_kg")
+        incumbent_basis = "previous run's recorded holdout MAE"
+        if incumbent_mae is not None:
+            print(f"\n  Incumbent was trained through {trained_through}, which includes this "
+                  f"holdout — comparing recorded metrics instead of re-scoring it.")
+    elif MODEL_PATH.exists():
+        try:
+            old = joblib.load(MODEL_PATH)
+            incumbent_mae = float(mean_absolute_error(y_test, old.predict(X_test)))
+            incumbent_basis = "incumbent scored on this holdout"
+        except Exception as exc:
+            print(f"\n  [WARN] Could not score the incumbent model: {exc}")
+
+    if incumbent_mae is not None:
+        delta = test_metrics["MAE_eur_kg"] - incumbent_mae
+        print(f"\n  Incumbent ({incumbent_basis}): MAE €{incumbent_mae:.4f}")
+        print(f"  New model:                     MAE €{test_metrics['MAE_eur_kg']:.4f}"
+              f"  ({delta:+.4f})")
 
     # ── Feature importances ───────────────────────────────────────────────────
     lgb_model = pipeline.named_steps["model"]
@@ -366,31 +571,65 @@ def main():
         bar = "█" * int(imp / importances.max() * 20)
         print(f"    {feat:25s} {bar} {imp:,}")
 
-    # ── SHAP values (test set) ────────────────────────────────────────────────
+    # ── SHAP values (sample of the holdout) ───────────────────────────────────
+    # Wrapped: nothing in the dashboards currently reads these artifacts, so an
+    # explainability failure must never throw away a model that trained fine.
+    # A previous run died here after 12 minutes of good work.
     print("\nComputing SHAP values…")
-    prep      = pipeline.named_steps["prep"]
-    X_test_t  = prep.transform(X_test)
-    X_train_t = prep.transform(X_train)
+    try:
+        prep      = pipeline.named_steps["prep"]
+        X_test_t  = prep.transform(X_test)
+        X_train_t = prep.transform(X_train)
 
-    # Use a 200-row background sample for efficiency
-    rng = np.random.default_rng(42)
-    bg_idx = rng.choice(len(X_train_t), size=min(200, len(X_train_t)), replace=False)
-    X_bg = X_train_t[bg_idx]
+        rng = np.random.default_rng(42)
+        bg_idx = rng.choice(len(X_train_t), size=min(200, len(X_train_t)), replace=False)
+        X_bg = X_train_t[bg_idx]
 
-    explainer   = shap.TreeExplainer(lgb_model, data=X_bg)
-    shap_values = explainer(X_test_t)
+        # Sample the holdout — it is ~30k rows now, and the pickle scales with it.
+        n_shap = min(SHAP_SAMPLE, len(X_test_t))
+        s_idx  = rng.choice(len(X_test_t), size=n_shap, replace=False)
 
-    joblib.dump(shap_values, SHAP_VAL_PATH)
-    joblib.dump(X_bg,        SHAP_BG_PATH)
-    print(f"  SHAP values saved → {SHAP_VAL_PATH.name}")
-    print(f"  SHAP background saved → {SHAP_BG_PATH.name}")
+        # Path-dependent TreeExplainer (no `data=`). The interventional variant
+        # this used to pass a background set to fails LightGBM's additivity
+        # check — the SHAP values did not sum to the model output.
+        explainer   = shap.TreeExplainer(lgb_model)
+        shap_values = explainer(X_test_t[s_idx])
 
-    # ── Re-fit on ALL data for deployment ─────────────────────────────────────
+        joblib.dump(shap_values, SHAP_VAL_PATH)
+        joblib.dump(X_bg,        SHAP_BG_PATH)
+        print(f"  SHAP values saved → {SHAP_VAL_PATH.name} ({n_shap:,} rows)")
+        print(f"  SHAP background saved → {SHAP_BG_PATH.name}")
+    except Exception as exc:
+        print(f"  [WARN] SHAP step failed, continuing: {exc}")
+
+    # ── Deploy, but only if the new model actually wins ───────────────────────
+    # Refit on everything including the holdout: the shipped model should see
+    # the most recent market. The holdout was for measurement, not for saving.
     print("\nRefitting on full dataset for deployment…")
     final_pipeline = build_pipeline()
-    final_pipeline.fit(X, y)
-    joblib.dump(final_pipeline, MODEL_PATH)
-    print(f"  Model saved → {MODEL_PATH.name}")
+    final_pipeline.fit(X, y, **FIT_KW)
+
+    TOLERANCE = 0.005      # €/kg — ignore noise-level differences
+    promote = True
+    if incumbent_mae is not None and test_metrics["MAE_eur_kg"] > incumbent_mae + TOLERANCE:
+        promote = False
+
+    if promote:
+        if MODEL_PATH.exists():
+            ARCHIVE_DIR.mkdir(exist_ok=True)
+            stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            shutil.copy2(MODEL_PATH, ARCHIVE_DIR / f"cattle_model_{stamp}.pkl")
+            if META_PATH.exists():
+                shutil.copy2(META_PATH, ARCHIVE_DIR / f"model_metadata_{stamp}.json")
+            print(f"  Previous model archived → {ARCHIVE_DIR.name}/cattle_model_{stamp}.pkl")
+        joblib.dump(final_pipeline, MODEL_PATH)
+        print(f"  Model saved → {MODEL_PATH.name}")
+    else:
+        cand = DIR / "cattle_model_candidate.pkl"
+        joblib.dump(final_pipeline, cand)
+        print(f"  NOT PROMOTED — the new model is worse on the holdout "
+              f"(€{test_metrics['MAE_eur_kg']:.4f} vs €{incumbent_mae:.4f}).")
+        print(f"  Live model left untouched. Candidate saved → {cand.name}")
 
     # ── Save test predictions ─────────────────────────────────────────────────
     test_preds = pd.DataFrame({
@@ -407,21 +646,50 @@ def main():
 
     meta = {
         "features":              ALL_FEATURES,
+        # The dashboards read this so they group breeds exactly as the model does.
+        "breed_levels":          sorted(df["breed_grp"].unique().tolist()),
+        "categorical_encoding":  "LightGBM native (ordinal codes declared categorical)",
         "numeric_features":      NUMERIC_FEATURES,
         "categorical_features":  CATEGORICAL_FEATURES,
         "target":                TARGET,
+        "trained_at":            datetime.now().isoformat(timespec="seconds"),
+        "n_rows_total":          int(len(df)),
+        "date_range":            [str(df["sale_dt"].min().date()),
+                                  str(df["sale_dt"].max().date())],
+        # How the model was evaluated. The previous version used a random split
+        # in which 100% of test lots came from a sale that was also in training;
+        # its scores are not comparable to these.
+        "evaluation": {
+            "primary":     f"grouped temporal — holdout = last {HOLDOUT_WEEKS} weeks",
+            "secondary":   "grouped random — unseen whole sales",
+            "cv":          "rolling-origin, expanding window",
+            "grouping_key": "mart | sale_id",
+            "holdout_cutoff": str(cutoff.date()),
+        },
         "train_metrics":         train_metrics,
-        "test_metrics":          test_metrics,
+        "test_metrics":          test_metrics,            # temporal (primary)
+        "test_metrics_grouped":  grouped_metrics,         # unseen sales
+        "cohort_metrics":        cohorts,
         "cv_mae_eur_kg":         round(cv_mae, 4),
-        "cv_mae_std":            round(float(cv_scores.std()), 4),
-        "n_train":               len(X_train),
-        "n_test":                len(X_test),
+        "cv_mae_std":            round(cv_std, 4),
+        "cv_fold_maes":          [round(m, 4) for m in cv_maes],
+        "incumbent_mae": (round(incumbent_mae, 4) if incumbent_mae is not None else None),
+        "incumbent_basis": incumbent_basis,
+        "promoted":              bool(promote),
+        "n_train":               int(len(X_train)),
+        "n_test":                int(len(X_test)),
         "feature_importances":   importances.round(1).to_dict(),
     }
-    with open(META_PATH, "w") as f:
+    # Metadata must describe the model that is actually deployed. Writing the
+    # candidate's metadata over the live file while leaving the old pickle in
+    # place desyncs them — and the dashboards read `breed_levels` from here, so
+    # they would group breeds one way while the live model expects another.
+    meta_target = META_PATH if promote else DIR / "model_metadata_candidate.json"
+    with open(meta_target, "w") as f:
         json.dump(meta, f, indent=2)
-    print(f"  Metadata saved → {META_PATH.name}")
-    print(f"\nDone. Test R²={test_metrics['R2']:.4f}  MAE=€{test_metrics['MAE_eur_kg']:.4f}/kg")
+    print(f"  Metadata saved → {meta_target.name}")
+    print(f"\nDone. TEMPORAL holdout — R²={test_metrics['R2']:.4f}  "
+          f"MAE=€{test_metrics['MAE_eur_kg']:.4f}/kg  |  promoted={promote}")
 
 
 if __name__ == "__main__":

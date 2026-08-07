@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Daily PDF Report Generator for MartBids.
-Builds a 5-page farmer-focused PDF, then emails it to recipients.
+Daily PDF Report Generator for MartIndex.
+Builds a 4-page farmer-focused PDF, then emails it to recipients.
 
-Pages:
-  1 - National Market Summary (KPIs, sex split, week-on-week)
-  2 - Breed × Weight Bracket (Males)
-  3 - Breed × Weight Bracket (Females)
+Pages, in the order main() builds them:
+  1 - Market Overview (KPIs, national trend, factory comparison)
+  2 - Price Tables (breed and weight bracket detail)
+  3 - National Summary (today's trade, sex split, week-on-week)
   4 - Regional Breakdown + Market Intelligence
-  5 - ML Model Metrics
 
 Email credentials: set env vars SMTP_USER and SMTP_PASS,
 or create email_config.json: {"user": "...", "pass": "..."}
@@ -28,6 +27,8 @@ from datetime import date, timedelta
 
 FACTORY_CSV = Path(__file__).parent / "factory_prices_clean.csv"
 
+from mart_coords import LSL_MART_REGIONS
+
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -39,7 +40,6 @@ warnings.filterwarnings("ignore")
 
 DIR          = Path(__file__).parent
 LOTS_CSV     = DIR / "sold_lots.csv"
-META_JSON    = DIR / "model_metadata.json"
 REPORT_PATH  = DIR / "daily_report.pdf"
 EMAIL_CONFIG = DIR / "email_config.json"
 
@@ -69,6 +69,8 @@ REGION_MAP = {
     "Midland and Western": "Leinster",
     "Clogher": "Ulster", "Donegal": "Ulster", "Donegal Suffolks": "Ulster",
     "Lisnaskea": "Ulster", "Raphoe": "Ulster", "Rathfriland": "Ulster",
+    # Livestock-Live marts (their own naming — see mart_coords.py)
+    **LSL_MART_REGIONS,
 }
 
 WEIGHT_BINS   = [0, 200, 300, 400, 500, 600, 9999]
@@ -214,17 +216,6 @@ def chart_breed_movers(df_valid: pd.DataFrame) -> Path:
     fig.tight_layout()
     return save_tmp(fig_to_png(fig), "_chart_movers.png")
 
-
-def chart_feature_importance(meta: dict) -> Path:
-    fi = pd.Series(meta.get("feature_importances", {})).sort_values(ascending=False).head(10)
-    fig, ax = plt.subplots(figsize=(8, 4))
-    fi[::-1].plot.barh(ax=ax, color=f"#{NAVY[0]:02x}{NAVY[1]:02x}{NAVY[2]:02x}")
-    ax.set_title("Top 10 Feature Importances", fontweight="bold")
-    ax.set_xlabel("Importance")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    fig.tight_layout()
-    return save_tmp(fig_to_png(fig), "_chart_fi.png")
 
 
 # ── PDF class ─────────────────────────────────────────────────────────────────
@@ -644,86 +635,6 @@ def page1_national_summary(report: Report, df_today: pd.DataFrame, df_valid: pd.
         report.cell(0, 6, f"Chart error: {e}", new_x="LMARGIN", new_y="NEXT")
 
 
-def page2_breed_weight_table(report: Report, df_valid: pd.DataFrame, sex: str, sex_label: str):
-    """Full breed × weight bracket price table for one sex."""
-    report.add_page()
-    report.section_title(f"Breed x Weight Bracket - {sex_label} (last 30 days, avg EUR/kg)")
-
-    # Use last 30 days for sufficient volume per cell
-    cutoff = df_valid["scraped_date"].max() - timedelta(days=30)
-    df_s = df_valid[(df_valid["scraped_date"] >= cutoff) &
-                    (df_valid["sex"] == sex) &
-                    (df_valid["breed"].isin(TOP_BREEDS))].copy()
-
-    pivot = (df_s.groupby(["breed", "weight_bracket"])["ppkg"]
-             .agg(["mean", "count"])
-             .reset_index())
-
-    breed_w = 28
-    bracket_w = (report.epw - breed_w) / len(WEIGHT_LABELS)
-
-    # Header
-    report.set_font("Helvetica", "B", 8)
-    report.set_fill_color(*NAVY)
-    report.set_text_color(255, 255, 255)
-    report.cell(breed_w, 7, "Breed", fill=True, align="C")
-    for lbl in WEIGHT_LABELS:
-        report.cell(bracket_w, 7, lbl, fill=True, align="C")
-    report.ln()
-    report.set_text_color(0, 0, 0)
-
-    # Data rows
-    for i, breed in enumerate(TOP_BREEDS):
-        fill = i % 2 == 0
-        report.set_fill_color(245, 247, 255) if fill else report.set_fill_color(255, 255, 255)
-        report.set_font("Helvetica", "B", 8)
-        report.cell(breed_w, 6, breed, fill=fill)
-        report.set_font("Helvetica", "", 8)
-        for bracket in WEIGHT_LABELS:
-            row = pivot[(pivot["breed"] == breed) & (pivot["weight_bracket"] == bracket)]
-            if row.empty or row.iloc[0]["count"] < 3:
-                val = "-"
-            else:
-                val = f"{row.iloc[0]['mean']:.2f}"
-            report.cell(bracket_w, 6, val, fill=fill, align="C")
-        report.ln()
-
-    report.ln(3)
-    report.set_font("Helvetica", "I", 7)
-    report.set_text_color(120, 120, 120)
-    report.cell(0, 5, "  Cells with fewer than 3 lots shown as  '-'   |   Values in EUR/kg",
-                new_x="LMARGIN", new_y="NEXT")
-    report.set_text_color(0, 0, 0)
-    report.ln(4)
-
-    # ── Lot counts table (same layout) ────────────────────────────────────────
-    report.section_title(f"Lot Counts - {sex_label} (last 30 days)")
-    report.set_font("Helvetica", "B", 8)
-    report.set_fill_color(*NAVY)
-    report.set_text_color(255, 255, 255)
-    report.cell(breed_w, 7, "Breed", fill=True, align="C")
-    for lbl in WEIGHT_LABELS:
-        report.cell(bracket_w, 7, lbl, fill=True, align="C")
-    report.cell(0, 7, " Total", fill=True, align="C")
-    report.ln()
-    report.set_text_color(0, 0, 0)
-
-    for i, breed in enumerate(TOP_BREEDS):
-        fill = i % 2 == 0
-        report.set_fill_color(245, 247, 255) if fill else report.set_fill_color(255, 255, 255)
-        report.set_font("Helvetica", "B", 8)
-        report.cell(breed_w, 6, breed, fill=fill)
-        report.set_font("Helvetica", "", 8)
-        total = 0
-        for bracket in WEIGHT_LABELS:
-            row = pivot[(pivot["breed"] == breed) & (pivot["weight_bracket"] == bracket)]
-            cnt = int(row.iloc[0]["count"]) if not row.empty else 0
-            total += cnt
-            report.cell(bracket_w, 6, str(cnt) if cnt > 0 else "-", fill=fill, align="C")
-        report.cell(0, 6, str(total), fill=fill, align="C")
-        report.ln()
-
-
 def page4_regional_and_intelligence(report: Report, df_valid: pd.DataFrame):
     report.add_page()
 
@@ -841,57 +752,6 @@ def page4_regional_and_intelligence(report: Report, df_valid: pd.DataFrame):
         report.cell(0, 6, f"Chart error: {e}", new_x="LMARGIN", new_y="NEXT")
 
 
-def page5_ml_metrics(report: Report, meta: dict, df_valid: pd.DataFrame):
-    if not meta:
-        return
-    report.add_page()
-    report.section_title("Model Performance Summary")
-
-    report.set_font("Helvetica", "", 9)
-    n_tr = meta.get("n_train", "?")
-    n_te = meta.get("n_test", "?")
-    cv   = meta.get("cv_mae_eur_kg", "?")
-    cv_s = meta.get("cv_mae_std", "?")
-    report.cell(0, 6,
-        f"Training rows: {n_tr:,}    Test rows: {n_te:,}    "
-        f"CV MAE: EUR {cv}/kg +/- EUR {cv_s}/kg",
-        new_x="LMARGIN", new_y="NEXT")
-    report.ln(2)
-
-    tm = meta.get("test_metrics", {})
-    col_w = [70, 50]
-    rows = [
-        ("Test R²",            f"{tm.get('R2', 'N/A')}"),
-        ("Test MAE (EUR/kg)",  f"{tm.get('MAE_eur_kg', 'N/A')}"),
-        ("Test RMSE (EUR/kg)", f"{tm.get('RMSE_eur_kg', 'N/A')}"),
-        ("MAPE (%)",           f"{tm.get('MAPE_%', 'N/A')}"),
-        ("Within 5%",          f"{tm.get('within_5pct', 'N/A')}%"),
-        ("Within 10%",         f"{tm.get('within_10pct', 'N/A')}%"),
-        ("Within 20%",         f"{tm.get('within_20pct', 'N/A')}%"),
-        ("Total lots in DB",   f"{len(df_valid):,}"),
-    ]
-    report.set_font("Helvetica", "B", 9)
-    report.set_fill_color(*NAVY)
-    report.set_text_color(255, 255, 255)
-    report.cell(col_w[0], 7, "Metric", fill=True)
-    report.cell(col_w[1], 7, "Value", fill=True)
-    report.ln()
-    report.set_text_color(0, 0, 0)
-    report.set_font("Helvetica", "", 9)
-    for i, (k, v) in enumerate(rows):
-        fill = i % 2 == 0
-        report.set_fill_color(245, 247, 255) if fill else report.set_fill_color(255, 255, 255)
-        report.cell(col_w[0], 6, k, fill=fill)
-        report.cell(col_w[1], 6, v, fill=fill, new_x="LMARGIN", new_y="NEXT")
-    report.ln(5)
-
-    try:
-        p = chart_feature_importance(meta)
-        report.add_image_full(p, h=65)
-    except Exception as e:
-        report.cell(0, 6, f"Chart error: {e}", new_x="LMARGIN", new_y="NEXT")
-
-
 # ── Email ─────────────────────────────────────────────────────────────────────
 
 def get_smtp_credentials():
@@ -962,8 +822,6 @@ def main():
         msg = f"Mart data last updated {latest_mart.date()} ({days_stale} day(s) ago) — no new lots scraped today"
         print(f"  WARNING: {msg}")
         warnings.append(msg)
-
-    meta = json.loads(META_JSON.read_text()) if META_JSON.exists() else None
 
     report = Report(orientation="P", unit="mm", format="A4")
     report.set_auto_page_break(auto=True, margin=12)
